@@ -9,7 +9,7 @@ description: >-
   or author quota-recovery plugins.
 ---
 
-<!-- routing-optimizer:version=0.1.2 -->
+<!-- routing-optimizer:version=0.1.3 -->
 
 # Design a subscription-aware routing config
 

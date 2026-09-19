@@ -9,7 +9,7 @@ description: >-
   NOT for first-time micode.json creation, application code, or non-model config.
 ---
 
-<!-- routing-optimizer:version=0.1.2 -->
+<!-- routing-optimizer:version=0.1.3 -->
 
 # Optimize micode.json model assignments
 
