@@ -92,12 +92,15 @@ cd opencode-model-routing-optimizer
 bun install
 bun run build
 mkdir -p ~/.config/opencode/plugins/opencode-model-routing-optimizer
-cp dist/index.js ~/.config/opencode/plugins/opencode-model-routing-optimizer/
+cp -r dist/. ~/.config/opencode/plugins/opencode-model-routing-optimizer/
 ```
 
-Restart opencode. `opencode` loads everything under `~/.config/opencode/plugins/`
-automatically ([docs](https://opencode.ai/docs/plugins/#use-a-plugin)). Any
-edit to `src/` followed by `bun run build && cp dist/index.js ~/.config/opencode/plugins/opencode-model-routing-optimizer/index.js`
+The plugin is a multi-file build (`index.js` + `installer.js` + `assets/`),
+so copy the whole `dist/` directory — copying only `index.js` leaves the
+plugin unable to load. Restart opencode. `opencode` loads everything under
+`~/.config/opencode/plugins/` automatically
+([docs](https://opencode.ai/docs/plugins/#use-a-plugin)). Any edit to
+`src/` followed by `bun run build && cp -r dist/. ~/.config/opencode/plugins/opencode-model-routing-optimizer/`
 takes effect on the next restart.
 
 ## Verifying the install
