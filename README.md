@@ -30,10 +30,19 @@ gracefully on quota exhaustion.
 
 ## Installation
 
-This plugin ships via **npm** as a standard opencode plugin package and
-is listed in the opencode ecosystem page.
+opencode's plugin loader supports exactly two install paths
+([docs](https://opencode.ai/docs/plugins/#use-a-plugin)):
 
-### Path 1 — npm (recommended)
+| Path                                                          | How                                                                                                      |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| **A. npm package** (works once the package is on npm)             | Listed in `~/.config/opencode/opencode.json` `plugin: [...]`; Bun installs it at startup into `~/.cache/opencode/node_modules/` |
+| **B. local plugin directory** (works without ever publishing to npm) | Drop the built file into `~/.config/opencode/plugins/` (project: `.opencode/plugins/`)           |
+
+Pick whichever applies. Path A is the only way anyone else can install
+this. Path B is enough for you to test it yourself today, even before
+the npm publish step below has run.
+
+### Path A — npm (for end users)
 
 ```sh
 bun add -g opencode-model-routing-optimizer
@@ -54,42 +63,21 @@ Restart opencode. The four files (`SKILL.md`s and `.md` commands) get
 copied into `~/.config/opencode/skills/` and `~/.config/opencode/command/`
 on first load — and re-copied automatically on every plugin upgrade.
 
-### Path 2 — local checkout (for development / self-hosted)
+### Path B — local plugin file (for development, or before npm is set up)
 
 ```sh
 git clone https://github.com/squizzeak/opencode-model-routing-optimizer
 cd opencode-model-routing-optimizer
 bun install
 bun run build
+mkdir -p ~/.config/opencode/plugins/opencode-model-routing-optimizer
+cp dist/index.js ~/.config/opencode/plugins/opencode-model-routing-optimizer/
 ```
 
-Then point opencode at the local build (in `~/.config/opencode/opencode.json`):
-
-```jsonc
-{
-  "plugin": [
-    ...,
-    "/absolute/path/to/opencode-model-routing-optimizer/dist/index.js"
-  ]
-}
-```
-
-Restart opencode. The local `dist/index.js` is loaded directly, so any
-edit to `src/` followed by `bun run build` takes effect on next startup.
-
-### Path 3 — GitHub release artifact
-
-If you don't want to add npm to your environment, install straight from
-the GitHub release tarball that `bun` understands natively:
-
-```jsonc
-{
-  "plugin": [
-    ...,
-    "github:squizzeak/opencode-model-routing-optimizer#v0.1.0"
-  ]
-}
-```
+Restart opencode. `opencode` loads everything under `~/.config/opencode/plugins/`
+automatically ([docs](https://opencode.ai/docs/plugins/#use-a-plugin)). Any
+edit to `src/` followed by `bun run build && cp dist/index.js ~/.config/opencode/plugins/opencode-model-routing-optimizer/index.js`
+takes effect on the next restart.
 
 ## Verifying the install
 
@@ -209,23 +197,47 @@ The result of `bun run build` is the publishable artifact.
 
 ### Publishing
 
-The repo includes a GitHub Actions workflow (`.github/workflows/publish.yml`)
-that publishes to npm via OIDC trusted publishing on every tagged release.
-For first-time setup:
+Publishing is via **npm OIDC trusted publishing** — no long-lived
+`NPM_TOKEN` secret in github, no `npm login` dance per release.
+[`.github/workflows/publish.yml`](.github/workflows/publish.yml) runs on
+every `v*.*.*` tag push, builds + tests + publishes.
 
-1. Create the npm package: `npm publish --access public` (or trigger a
-   tagged release once OIDC is configured).
-2. In npm settings, add a Trusted Publisher that points to this GitHub
-   repo + the `release.yml` workflow file. Subsequent releases publish
-   without managing tokens.
+One-time setup (per repo, per npm namespace):
 
-Manual local publish:
+1. **Create an npmjs.com account** if you don't have one. Free. Email +
+   username + password + TOTP. ~2 minutes.
+2. **First publish from your terminal** (one-time, to claim the name):
+   ```sh
+   npm login
+   # (interactive: enter username, password, email, 2FA)
+   ```
+   ```sh
+   npm run typecheck
+   bun run build
+   npm publish --provenance --access public
+   ```
+3. **Link this GitHub repo as the Trusted Publisher** for that npm
+   package so future pushes publish automatically without `npm login`:
+   - Open <https://www.npmjs.com/package/opencode-model-routing-optimizer/access>
+   - Under "Publishing access" → "Add a Trusted Publisher":
+     - Repository owner: `squizzeak`
+     - Repository: `opencode-model-routing-optimizer`
+     - Workflow filename: `publish.yml`
+     - Environment: (leave blank — no environment selected)
+   - Save.
+4. **Push a tag** to test the loop:
+   ```sh
+   git tag v0.1.0
+   git push origin v0.1.0
+   ```
+   GitHub Actions will publish a new version automatically. After this,
+   every `git tag v*.*.* && git push --tags` is a release.
 
-```sh
-npm login                # one-time
-npm run build
-npm publish --access public
-```
+If you ever want to roll back a release: npm publishes are immutable,
+but you can deprecate (`npm deprecate`) or unpublish within 72 hours
+via the npm web UI / CLI. Roll back the tag with
+`git tag -d v0.1.0 && git push --delete origin v0.1.0` if the
+workflow-side release failed before publishing.
 
 ## License
 

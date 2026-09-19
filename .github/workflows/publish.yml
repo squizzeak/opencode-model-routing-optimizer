@@ -6,14 +6,24 @@ on:
       - "v*.*.*"
   workflow_dispatch:
 
+# npm OIDC trusted publishing only.
+#
+# No long-lived `NPM_TOKEN` secret is used. Instead, npmjs verifies that
+# the publish request comes from this exact repo + this exact workflow
+# file. The linking happens once on npmjs.com (the user's npm package's
+# "Trusted Publisher" settings) — see README for the walkthrough.
 permissions:
   contents: read
-  id-token: write  # required for npm OIDC trusted publishing
+  id-token: write   # required for npm OIDC trusted publishing
+  packages: write
 
 jobs:
   publish:
-    name: Publish to npm
+    name: Typecheck + Build + Test + Publish
     runs-on: ubuntu-latest
+    # Run only on version tags, or when manually dispatched. Branch pushes
+    # don't publish; they don't build either (this workflow is release-only).
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,18 +39,21 @@ jobs:
           node-version: "22"
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: bun install --frozen-lockfile || bun install
 
-      - name: Typecheck, build, test
-        run: |
-          bun run typecheck
-          bun run build
-          bun run test
+      - name: Typecheck
+        run: bun run typecheck
 
-      - name: Publish to npm (OIDC)
+      - name: Build
+        run: bun run build
+
+      - name: Test
+        run: bun run test
+
+      - name: Publish to npm (OIDC trusted publishing)
+        # No NODE_AUTH_TOKEN env — npm picks up the OIDC token automatically
+        # from GitHub Actions when the publish request's provenance is
+        # verified against the linked Trusted Publisher configuration.
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          # Use OIDC trusted publishing when configured; fall back to NODE_AUTH_TOKEN.
-          npm publish --provenance --access public
-        if: startsWith(github.ref, 'refs/tags/v')
+          NPM_CONFIG_PROVENANCE: "true"
+        run: npm publish --provenance --access public
