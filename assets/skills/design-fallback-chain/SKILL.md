@@ -3,7 +3,7 @@ name: design-fallback-chain
 description: Use ONLY when designing a subscription-aware routing config for `opencode-model-router` — typically a new `presets.<name>` block plus a `fallback.global` chain that lets one bundled subscription (the user's "heavy" tier — opencode-go, ChatGPT Plus/Pro via Codex auth, GitHub Copilot, z.ai coding, Anthropic Claude via API, or any other provider the user has configured) carry genuinely hard work while a cheaper bundled route carries routine work and acts as the first fallback when the heavy quota exhausts. Provider-agnostic: the skill accepts any pair of configured providers for the `<cheap>` and `<heavy>` slots and resolves friendly names (`claude` → `anthropic`, `codex` → `openai`, `copilot` → `github-copilot`, `zai` → `zai`, etc.) against the user's `~/.config/opencode/opencode.json`. Triggers on "subscription-first routing", "preserve Codex quota", "preserve Claude quota", "preserve Copilot quota", "design router preset", "config opencode-model-router for two subscriptions", "subscription-aware tier assignment", "configure fallback chain", "opencode-model-router overrides", "tiers.jsonc config", "/design-fallback-chain". Does NOT modify `micode.json` (that is the sibling `optimize-micode-models` skill's scope). Does NOT author custom watcher plugins to auto-detect quota exhaustion — that is a separate engineering task. Does NOT provision API keys or set up subscription auth — that is a separate `~/.config/opencode/opencode.json` change.
 ---
 
-<!-- routing-optimizer:version=0.1.0 -->
+<!-- routing-optimizer:version=0.1.1 -->
 
 # Design a subscription-aware routing config
 

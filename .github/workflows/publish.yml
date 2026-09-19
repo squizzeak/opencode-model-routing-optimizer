@@ -37,6 +37,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+          # Registry URL is REQUIRED for OIDC trusted publishing: setup-node
+          # uses it to (a) call GitHub's OIDC token endpoint using our
+          # `id-token: write` permission, (b) exchange that for a short-lived
+          # npm token via the trusted-publisher linkage on registry.npmjs.org,
+          # (c) expose the result as `NODE_AUTH_TOKEN` for `npm publish`.
+          # Without this, npm has no auth at all and errors with ENEEDAUTH.
+          registry-url: "https://registry.npmjs.org/"
 
       - name: Install dependencies
         run: bun install --frozen-lockfile || bun install

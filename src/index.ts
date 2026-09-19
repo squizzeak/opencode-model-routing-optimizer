@@ -20,7 +20,7 @@ import {
  * No interactive side effects, no commands, no keybindings — `opencode`
  * still starts even when every install fails.
  */
-const PLUGIN_VERSION = "0.1.0";
+const PLUGIN_VERSION = "0.1.1";
 
 /**
  * Resolve the user's opencode config root, honoring `XDG_CONFIG_HOME` when

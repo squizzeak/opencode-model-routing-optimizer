@@ -12,8 +12,22 @@ import { test, expect, describe } from "bun:test";
 import { compareSemver, needsInstall, readVersion } from "../src/installer.ts";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 
 const REPO = fileURLToPath(new URL("..", import.meta.url));
+
+/**
+ * Read the canonical plugin version straight from `package.json` so the
+ * shipped-asset markers test stays in sync without hand-editing this
+ * file every release. (Before this, the test was known to drift — every
+ * release required updating this literal.)
+ */
+function loadPkgVersion(): string {
+  const pkg = JSON.parse(
+    readFileSync(join(REPO, "package.json"), "utf8"),
+  ) as { version: string };
+  return pkg.version;
+}
 
 describe("compareSemver", () => {
   test("orders basic numbers", () => {
@@ -65,8 +79,8 @@ describe("readVersion against shipped assets", () => {
       const v = await readVersion(path);
       expect(v).toBeDefined();
       expect(v).toMatch(/^\d+\.\d+\.\d+/);
-      // Must match package.json's version field (kept in sync by hand)
-      expect(v).toBe("0.1.0");
+      // Must match package.json's version field (auto-synced by loadPkgVersion)
+      expect(v).toBe(loadPkgVersion());
     }
   });
 

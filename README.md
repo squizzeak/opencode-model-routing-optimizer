@@ -110,7 +110,7 @@ ls ~/.config/opencode/skills/optimize-micode-models/SKILL.md \
 Each file should contain a line near the top:
 
 ```html
-<!-- routing-optimizer:version=0.1.0 -->
+<!-- routing-optimizer:version=0.1.1 -->
 ```
 
 That marker is what tells the plugin whether to overwrite on upgrade.
@@ -227,8 +227,8 @@ One-time setup (per repo, per npm namespace):
    - Save.
 4. **Push a tag** to test the loop:
    ```sh
-   git tag v0.1.0
-   git push origin v0.1.0
+   git tag v0.1.1
+   git push origin v0.1.1
    ```
    GitHub Actions will publish a new version automatically. After this,
    every `git tag v*.*.* && git push --tags` is a release.
@@ -236,7 +236,7 @@ One-time setup (per repo, per npm namespace):
 If you ever want to roll back a release: npm publishes are immutable,
 but you can deprecate (`npm deprecate`) or unpublish within 72 hours
 via the npm web UI / CLI. Roll back the tag with
-`git tag -d v0.1.0 && git push --delete origin v0.1.0` if the
+`git tag -d v0.1.1 && git push --delete origin v0.1.1` if the
 workflow-side release failed before publishing.
 
 ## License

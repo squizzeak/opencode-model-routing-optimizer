@@ -3,7 +3,7 @@ description: Design a subscription-aware routing config for `opencode-model-rout
 agent: commander
 ---
 
-<!-- routing-optimizer:version=0.1.0 -->
+<!-- routing-optimizer:version=0.1.1 -->
 
 # /design-fallback-chain
 

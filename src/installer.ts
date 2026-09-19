@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 /**
  * Marker prefix used to version-tag each asset shipped by this plugin.
  * Format inside a shipped markdown file:
- *   <!-- routing-optimizer:version=0.1.0 -->
+ *   <!-- routing-optimizer:version=0.1.1 -->
  * The installer extracts the `<version=` substring to decide whether the
  * destination file is stale.
  */
@@ -68,7 +68,7 @@ export const INSTALL_TARGETS: ReadonlyArray<InstallTarget> = [
  *     ...
  *     ---
  *
- *     <!-- routing-optimizer:version=0.1.0 -->
+ *     <!-- routing-optimizer:version=0.1.1 -->
  *
  * Implementation: read the first ~1 KB, find the first occurrence of the
  * marker prefix, and parse the value after `=`.
