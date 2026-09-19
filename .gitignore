@@ -1,0 +1,20 @@
+# dependencies / build artifacts
+node_modules/
+dist/
+*.tsbuildinfo
+
+# logs
+*.log
+npm-debug.log*
+
+# env
+.env
+.env.local
+
+# editor / OS
+.DS_Store
+.vscode/
+.idea/
+
+# npm cache (in case publish is run locally)
+.npm/

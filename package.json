@@ -1,0 +1,69 @@
+{
+  "name": "opencode-model-routing-optimizer",
+  "version": "0.1.0",
+  "description": "OpenCode plugin that installs the optimize-micode-models and design-fallback-chain skills plus their slash commands for Pareto-optimal model assignments and subscription-aware tier routing.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./assets/*": "./dist/assets/*"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "tag": "latest",
+    "provenance": true
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "opencode-go",
+    "model-routing",
+    "pareto",
+    "subscription",
+    "fallback-chain",
+    "tier-routing",
+    "presets",
+    "micode",
+    "cost-optimization",
+    "ai-agents"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/squizzeak/opencode-model-routing-optimizer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/squizzeak/opencode-model-routing-optimizer/issues"
+  },
+  "homepage": "https://github.com/squizzeak/opencode-model-routing-optimizer#readme",
+  "scripts": {
+    "build": "bun run scripts/build.ts",
+    "typecheck": "tsc -p tsconfig.typecheck.json",
+    "test": "bun test test/",
+    "prepublishOnly": "bun run typecheck && bun run build && bun run test"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": "*"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "^1.18.31",
+    "@types/bun": "latest",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "directories": {
+    "test": "test"
+  }
+}
