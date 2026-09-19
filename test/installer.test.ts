@@ -9,12 +9,28 @@
  * installer's I/O path is exercised every time opencode loads the plugin.
  */
 import { test, expect, describe } from "bun:test";
-import { compareSemver, needsInstall, readVersion } from "../src/installer.ts";
+import { compareSemver, needsInstall, readVersion, INSTALL_TARGETS } from "../src/installer.ts";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
 
 const REPO = fileURLToPath(new URL("..", import.meta.url));
+
+describe("shipped skill metadata", () => {
+  for (const target of INSTALL_TARGETS.filter((target) => target.srcRel.endsWith("/SKILL.md"))) {
+    test(`${target.srcRel} has discoverable YAML frontmatter`, () => {
+      const content = readFileSync(join(REPO, "assets", target.srcRel), "utf8");
+      const frontmatter = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+      expect(frontmatter).not.toBeNull();
+      // Unquoted colon-space sequences in descriptions previously prevented discovery.
+      const metadata = Bun.YAML.parse(frontmatter![1]) as Record<string, unknown>;
+      expect(metadata.name).toBe(target.srcRel.split("/")[1]);
+      expect(typeof metadata.description).toBe("string");
+      expect((metadata.description as string).length).toBeGreaterThan(0);
+      expect((metadata.description as string).length).toBeLessThanOrEqual(1024);
+    });
+  }
+});
 
 /**
  * Read the canonical plugin version straight from `package.json` so the

@@ -1,6 +1,12 @@
 ---
 name: optimize-micode-models
-description: Use ONLY when auditing or optimizing `model` assignments in `~/.config/opencode/micode.json`. Triggers on phrases like "optimize micode models", "review model assignments", "pareto optimal micode", "swap agents to better models", "what models should each agent use", "audit my opencode config", "is my config optimal", "compare providers openai anthropic opencode-go", "which provider should I use for X model", "cheapest provider for X", "fastest provider for X", "should I switch off opencode-go", "3rd party markup", "openrouter pricing", or any request to evaluate the agent model map across providers with markups, discounts, and per-provider latency differences. Applies Pareto-dominance across **(provider, model)** tuples: drops strictly-dominated options, recommends swaps only when an alternative beats the current on every axis on every provider. NOT for first-time micode.json creation, NOT for application code, NOT for non-model config fields (permissions, plugins, MCP, agents, skills).
+description: >-
+  Use ONLY when auditing or optimizing model assignments in
+  ~/.config/opencode/micode.json, including /optimize-micode, Pareto-optimal
+  model selection, provider pricing or latency comparisons, subscription quotas,
+  and agent model swaps. Compares (provider, model) tuples and recommends swaps
+  only when an alternative beats the current choice on every evaluated axis.
+  NOT for first-time micode.json creation, application code, or non-model config.
 ---
 
 <!-- routing-optimizer:version=0.1.2 -->
