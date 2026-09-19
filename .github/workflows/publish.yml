@@ -37,13 +37,17 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-          # Registry URL is REQUIRED for OIDC trusted publishing: setup-node
-          # uses it to (a) call GitHub's OIDC token endpoint using our
-          # `id-token: write` permission, (b) exchange that for a short-lived
-          # npm token via the trusted-publisher linkage on registry.npmjs.org,
-          # (c) expose the result as `NODE_AUTH_TOKEN` for `npm publish`.
-          # Without this, npm has no auth at all and errors with ENEEDAUTH.
+          # Configure the registry; npm CLI performs the OIDC exchange,
+          # not setup-node. No long-lived NODE_AUTH_TOKEN is needed.
           registry-url: "https://registry.npmjs.org/"
+
+      - name: Install npm with trusted publishing support
+        # Trusted publishing requires npm >=11.5.1. Node 22 bundles npm 10,
+        # which can sign provenance but cannot authenticate via OIDC.
+        run: |
+          npm install --global npm@11
+          node --version
+          npm --version
 
       - name: Install dependencies
         run: bun install --frozen-lockfile || bun install
@@ -58,9 +62,8 @@ jobs:
         run: bun run test
 
       - name: Publish to npm (OIDC trusted publishing)
-        # No NODE_AUTH_TOKEN env — npm picks up the OIDC token automatically
-        # from GitHub Actions when the publish request's provenance is
-        # verified against the linked Trusted Publisher configuration.
+        # npm 11 exchanges the GitHub Actions OIDC token for npm credentials.
+        # Authentication and provenance signing are separate operations.
         #
         # `--access public` is intentionally omitted: this workflow is
         # re-used for both private (early) and public (release) publishes.
