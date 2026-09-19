@@ -30,17 +30,19 @@ gracefully on quota exhaustion.
 
 ## Installation
 
-opencode's plugin loader supports exactly two install paths
+opencode's plugin loader supports three ways to reference a plugin
 ([docs](https://opencode.ai/docs/plugins/#use-a-plugin)):
 
-| Path                                                          | How                                                                                                      |
-| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| **A. npm package** (works once the package is on npm)             | Listed in `~/.config/opencode/opencode.json` `plugin: [...]`; Bun installs it at startup into `~/.cache/opencode/node_modules/` |
-| **B. local plugin directory** (works without ever publishing to npm) | Drop the built file into `~/.config/opencode/plugins/` (project: `.opencode/plugins/`)           |
+| Path | How |
+| --- | --- |
+| **A. npm package** | Listed in `~/.config/opencode/opencode.json` `plugin: [...]`; Bun installs it at startup into `~/.cache/opencode/node_modules/` |
+| **B. GitHub reference** | Same `plugin: [...]` entry, but `github:owner/repo` — Bun clones and installs straight from the repo, no npm publish needed |
+| **C. local plugin directory** | Drop the built file into `~/.config/opencode/plugins/` (project: `.opencode/plugins/`) |
 
-Pick whichever applies. Path A is the only way anyone else can install
-this. Path B is enough for you to test it yourself today, even before
-the npm publish step below has run.
+Pick whichever applies. Path A is the most convenient for end users.
+Path B installs the latest commit from this repo directly — handy for
+testing unreleased changes without publishing to npm. Path C is the
+lightest for local development.
 
 ### Path A — npm (for end users)
 
@@ -63,7 +65,26 @@ Restart opencode. The four files (`SKILL.md`s and `.md` commands) get
 copied into `~/.config/opencode/skills/` and `~/.config/opencode/command/`
 on first load — and re-copied automatically on every plugin upgrade.
 
-### Path B — local plugin file (for development, or before npm is set up)
+### Path B — GitHub reference (direct, no npm publish needed)
+
+Add the repo reference to your opencode config:
+
+```jsonc
+{
+  "plugin": [
+    ...,
+    "github:squizzeak/opencode-model-routing-optimizer"
+  ]
+}
+```
+
+Restart opencode. Bun clones the repo and installs it into
+`~/.cache/opencode/node_modules/` at startup, exactly like an npm
+package — the `dist/` build output is committed to the repo, so the
+plugin loads without a build step. This tracks the default branch's
+latest commit rather than a published release.
+
+### Path C — local plugin file (for development)
 
 ```sh
 git clone https://github.com/squizzeak/opencode-model-routing-optimizer
