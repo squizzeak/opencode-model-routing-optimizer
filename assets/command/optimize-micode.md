@@ -3,7 +3,7 @@ description: Audit and Pareto-optimize the `model` field for every agent in `~/.
 agent: commander
 ---
 
-<!-- routing-optimizer:version=0.1.1 -->
+<!-- routing-optimizer:version=0.1.2 -->
 
 # /optimize-micode
 

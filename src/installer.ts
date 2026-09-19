@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 /**
  * Marker prefix used to version-tag each asset shipped by this plugin.
  * Format inside a shipped markdown file:
- *   <!-- routing-optimizer:version=0.1.1 -->
+ *   <!-- routing-optimizer:version=0.1.2 -->
  * The installer extracts the `<version=` substring to decide whether the
  * destination file is stale.
  */
@@ -68,7 +68,7 @@ export const INSTALL_TARGETS: ReadonlyArray<InstallTarget> = [
  *     ...
  *     ---
  *
- *     <!-- routing-optimizer:version=0.1.1 -->
+ *     <!-- routing-optimizer:version=0.1.2 -->
  *
  * Implementation: read the first ~1 KB, find the first occurrence of the
  * marker prefix, and parse the value after `=`.
@@ -101,9 +101,9 @@ export async function readVersion(
  *
  * Semver string comparison is intentionally simple: we use the `>` operator
  * on the version strings. Both versions are expected to follow semver; the
- * fallback (string) comparison handles `0.1.0` < `0.1.1` correctly because
+ * fallback (string) comparison handles `0.1.0` < `0.1.2` correctly because
  * numeric components compare longer-than-alpha via string compare of zero-
- * padded values, and identical-length strings like `0.1.0` vs `0.1.10`
+ * padded values, and identical-length strings like `0.1.0` vs `0.1.20`
  * would otherwise compare wrong. We mitigate that by falling back to
  * `compareSemver` — see the implementation.
  */

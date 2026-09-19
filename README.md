@@ -110,7 +110,7 @@ ls ~/.config/opencode/skills/optimize-micode-models/SKILL.md \
 Each file should contain a line near the top:
 
 ```html
-<!-- routing-optimizer:version=0.1.1 -->
+<!-- routing-optimizer:version=0.1.2 -->
 ```
 
 That marker is what tells the plugin whether to overwrite on upgrade.
@@ -200,22 +200,26 @@ The result of `bun run build` is the publishable artifact.
 Publishing is via **npm OIDC trusted publishing** — no long-lived
 `NPM_TOKEN` secret in github, no `npm login` dance per release.
 [`.github/workflows/publish.yml`](.github/workflows/publish.yml) runs on
-every `v*.*.*` tag push, builds + tests + publishes.
+every `v*.*.*` tag push, builds + tests + publishes. CI-minted releases
+carry **provenance attestation**; a local `npm publish` never does — see
+[About provenance](#about-provenance) below.
 
 One-time setup (per repo, per npm namespace):
 
 1. **Create an npmjs.com account** if you don't have one. Free. Email +
    username + password + TOTP. ~2 minutes.
-2. **First publish from your terminal** (one-time, to claim the name):
+2. **First publish from your terminal** (one-time, to claim the name
+   before the Trusted Publisher linkage can be added):
    ```sh
    npm login
    # (interactive: enter username, password, email, 2FA)
-   ```
-   ```sh
    npm run typecheck
    bun run build
-   npm publish --provenance --access public
+   npm publish
    ```
+   `publishConfig` in `package.json` already sets `access: "public"`, so
+   no CLI flag is needed. The first release lands **without** provenance
+   (only CI mints that) — that's expected.
 3. **Link this GitHub repo as the Trusted Publisher** for that npm
    package so future pushes publish automatically without `npm login`:
    - Open <https://www.npmjs.com/package/opencode-model-routing-optimizer/access>
@@ -227,16 +231,25 @@ One-time setup (per repo, per npm namespace):
    - Save.
 4. **Push a tag** to test the loop:
    ```sh
-   git tag v0.1.1
-   git push origin v0.1.1
+   git tag v0.1.2
+   git push origin v0.1.2
    ```
-   GitHub Actions will publish a new version automatically. After this,
-   every `git tag v*.*.* && git push --tags` is a release.
+   GitHub Actions will publish the new version automatically. After
+   this, every `git tag v*.*.* && git push --tags` is a release.
+
+#### About provenance
+
+`dist.provenance` lets consumers verify a release was built and
+published from the linked GitHub repo by your trusted CI workflow.
+This package opts in (`publishConfig.provenance: true`), so every CI
+release from v0.1.2 forward carries provenance. npm mints provenance
+only from a known CI provider's OIDC token — a local CLI publish never
+gets it regardless of flags.
 
 If you ever want to roll back a release: npm publishes are immutable,
 but you can deprecate (`npm deprecate`) or unpublish within 72 hours
 via the npm web UI / CLI. Roll back the tag with
-`git tag -d v0.1.1 && git push --delete origin v0.1.1` if the
+`git tag -d v0.1.2 && git push --delete origin v0.1.2` if the
 workflow-side release failed before publishing.
 
 ## License

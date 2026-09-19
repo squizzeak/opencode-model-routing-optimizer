@@ -1,6 +1,6 @@
 {
   "name": "opencode-model-routing-optimizer",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "OpenCode plugin that installs the optimize-micode-models and design-fallback-chain skills plus their slash commands for Pareto-optimal model assignments and subscription-aware tier routing.",
   "type": "module",
   "main": "./dist/index.js",
@@ -20,7 +20,7 @@
   "publishConfig": {
     "access": "public",
     "tag": "latest",
-    "provenance": false
+    "provenance": true
   },
   "keywords": [
     "opencode",
