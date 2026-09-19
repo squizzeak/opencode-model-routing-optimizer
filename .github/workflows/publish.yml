@@ -54,6 +54,12 @@ jobs:
         # No NODE_AUTH_TOKEN env — npm picks up the OIDC token automatically
         # from GitHub Actions when the publish request's provenance is
         # verified against the linked Trusted Publisher configuration.
+        #
+        # `--access public` is intentionally omitted: this workflow is
+        # re-used for both private (early) and public (release) publishes.
+        # The effective access level comes from `publishConfig.access` in
+        # package.json — `restricted` for pre-release test publishes,
+        # `public` for the final 1.0+ tag.
         env:
           NPM_CONFIG_PROVENANCE: "true"
-        run: npm publish --provenance --access public
+        run: npm publish --provenance
