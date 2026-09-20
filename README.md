@@ -160,7 +160,10 @@ live and re-verifies its inputs.
 - Discovers configured providers from three live sources —
   `opencode.json`, the auth store, and the `opencode models` session
   catalog — and validates every candidate tuple against the live catalog.
-- Rechecks **live pricing and recent benchmarks on every run**; nothing
+  When `@slkiser/opencode-quota` is installed it additionally reads live
+  per-provider quota telemetry (grading only — it never adds a provider).
+- Rechecks **live pricing, benchmarks, and quota telemetry on every run**;
+  nothing
   is applied from memory, and each claim carries provenance
   (verified-live vs. user-asserted).
 - Computes Pareto dominance across cost / TTFT / quality / context /

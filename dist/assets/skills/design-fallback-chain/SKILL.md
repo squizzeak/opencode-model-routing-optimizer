@@ -5,7 +5,8 @@ description: >-
   opencode-model-router, including /design-fallback-chain, subscription-first
   routing, preserving subscription quota, tier assignment, and router overrides.
   Discovers providers and models dynamically from the live opencode session
-  (config, auth store, and `opencode models` output); hardcodes none.
+  (config, auth store, `opencode models` output, and @slkiser/opencode-quota
+  data when installed); hardcodes none.
   Rechecks live pricing, benchmark data, and — via the opencode-quota CLI —
   remaining-quota telemetry before every tier pick. Offers to install missing
   prerequisites (router plugin, opencode-quota, provider auth) with user
@@ -27,7 +28,7 @@ The user has **at least one bundled subscription** routed through opencode — a
 - **When a subscription exhausts**, fall back to the next configured provider — terminating at an explicitly free endpoint when one exists.
 - **Keep the orchestrator** (the lead agent that runs on every message) on the cheapest route so it doesn't itself burn the heavy subscription.
 
-This skill is **fully provider- and model-agnostic**. It contains no alias tables, no preferred providers, and no model IDs. Everything is resolved at runtime from three live sources (below). Providers that appear in prose here are illustrative placeholders, not defaults.
+This skill is **fully provider- and model-agnostic**. It contains no alias tables, no preferred providers, and no model IDs. Everything is resolved at runtime from four live sources (below). Providers that appear in prose here are illustrative placeholders, not defaults.
 
 ## What the plugin can and cannot do (the gap)
 
@@ -58,15 +59,16 @@ The orchestrator is **deliberately not** on the heavy subscription — that prot
 
 ## Workflow
 
-### 1. Inventory current state — three live sources
+### 1. Inventory current state — four live sources
 
-Provider and plugin truth comes from **three sources**, never from a static list. Read them in parallel:
+Provider and plugin truth comes from **four sources**, never from a static list. Read them in parallel:
 
 1. **`~/.config/opencode/opencode.json`** — the `plugin` array and any `provider.*` override blocks.
    - Build `configured_plugins`: normalize each `plugin` entry by stripping any npm scope (`@org/`) and any version/`@latest` suffix, so `opencode-model-router@latest` → `opencode-model-router`.
    - Build `provider_overrides`: the `provider.*` keys. Note: many valid providers have **no** entry here — they need no override.
 2. **`~/.local/share/opencode/auth.json`** — every key in this file is a provider with credentials registered. A provider can exist here (e.g. an OAuth subscription or a proxy-service key) with zero `provider.*` entry in `opencode.json` — opencode resolves it from models.dev + the auth store alone.
 3. **The live session catalog** — run `opencode models` and capture the full `provider/model-id` list. This is the **ground truth** for what each provider actually exposes in this session right now.
+4. **`opencode-quota show --json`** — when `@slkiser/opencode-quota` is installed: live per-provider quota/budget data (schema v2). Providers reporting `status: "ok"` or `"partial"` with entries are quota-managed; `percentRemaining` + `resetAt` feed tier and chain decisions. The CLI reads **cached** data collected by the plugin during normal opencode activity — a fresh install or idle session reports `unavailable` until opencode has run with the plugin active.
 
 ```bash
 opencode models 2>&1 | grep -v '^\[micode\]'   # strip unrelated plugin log lines
@@ -91,15 +93,15 @@ Never refuse on a missing prerequisite without first offering to fix it. Check i
    - Always install plugins as `@latest` (or the bare package name, which resolves the same way). Never pin a version.
    - On yes: apply the edit. The plugin loads on the next opencode start. **Continue designing** — writing the overrides file now is harmless (it's inert without the plugin) and means one restart activates everything. Say so.
    - On no: stop. The overrides file is inert without the plugin.
-2. **Live quota telemetry (recommended)**: the `opencode-quota` CLI turns quota classification from user-asserted into verified-live. It is a **recommended** prerequisite, not a hard one — without it the skill falls back to asking the user to classify subscriptions (step 3), which still works. Check for it first:
+2. **Live quota telemetry (recommended)**: `@slkiser/opencode-quota` turns quota classification from user-asserted into verified-live. The **opencode plugin** collects per-provider quota snapshots during normal opencode activity; the optional **`opencode-quota` CLI** (or the export file) reads that cache from scripts. The CLI alone never fills the cache — the plugin must be active in opencode. It is a **recommended** prerequisite, not a hard one — without it the skill falls back to asking the user to classify subscriptions (step 3), which still works. Check for it first:
    ```bash
    command -v opencode-quota && opencode-quota show --json >/dev/null 2>&1
    ```
    - If present → read `opencode-quota show --json` now and keep the parsed result for steps 3, 5, and 7. Note `fromCache`/`cacheAgeSeconds`; if the snapshot is stale, say so and treat the numbers as approximate.
    - If missing → show the exact install and ask via `confirm`:
-     > Install the quota telemetry CLI with `npm install -g @slkiser/opencode-quota@latest`? (Requires Node ≥ 22 — check `node --version` first. This adds a global CLI used to read live quota; it does not change your opencode config.)
+     > Add `"@slkiser/opencode-quota@latest"` to the `plugin` array in `~/.config/opencode/opencode.json`? (List any companion auth plugins **before** it — ordering matters. The plugin collects quota snapshots while opencode runs. Optionally also `npm install -g @slkiser/opencode-quota@latest` — requires Node ≥ 22 — for a terminal CLI; the plugin alone is enough for this skill, which can read the export file directly.)
      - Always install as `@latest`. Never pin a version.
-     - On yes: run it, then re-read `opencode-quota show --json`. (Optionally mention `opencode-quota init` for the TUI sidebar, but that interactive setup is out of this skill's scope — don't run it.)
+     - On yes: apply the edit, then read the export file at `~/.cache/opencode/quota-export.json` (written by the plugin; empty until opencode has run with it active — if absent, mark quota claims user-asserted for this run). (Optionally mention `opencode-quota init` for the TUI sidebar, but that interactive setup is out of this skill's scope — don't run it.)
      - On no: continue. Mark every quota claim in this run as **user-asserted**, not verified-live, and proceed to step 3's ask-the-user classification.
 3. **Both strategy providers configured**: the `<cheap>` and `<heavy>` providers (named or inferred in step 3) must both appear in `configured_providers`.
    - If a provider is missing → offer the setup recipe matching its shape, via `confirm`:
@@ -296,7 +298,7 @@ After applying, print:
 
 1. **Validation result** — JSONC parse + provider-coverage check + config-loader canary (zero "not available" warnings).
 2. **Rendered preset** — the full JSONC block, for visual confirmation.
-3. **Reasoning table** — one line per tier + one per fallback entry, explaining model choice and ratio/order.
+3. **Reasoning table** — one line per tier + one per fallback entry, explaining model choice and ratio/order. When quota data is available, add each provider's live `percentRemaining`/`resetAt`.
 4. **The lead-recovery gap** — reminder that the plugin cannot auto-recover the lead on quota exhaustion, with the manual `/preset <name>` recipe.
 5. **Restart reminder + post-restart verification** — restart, then `/router` / `/tiers` (and `/router preset <name>` if state drifted).
 

@@ -6,8 +6,10 @@ description: >-
   model selection, provider pricing or latency comparisons, subscription
   quotas, agent model swaps, and lead-agent delegation reliability. Discovers
   providers and models dynamically
-  from the live opencode session and rechecks live pricing/benchmark data on
-  every run. Compares (provider, model) tuples and recommends swaps only when
+  from the live opencode session and rechecks live pricing, benchmark data,
+  and — via @slkiser/opencode-quota when installed — remaining-quota
+  telemetry on every run. Compares (provider, model) tuples and recommends
+  swaps only when
   an alternative beats the current choice on every evaluated axis. NOT for
   first-time micode.json creation, application code, or non-model config.
 ---
@@ -26,15 +28,18 @@ Computes Pareto dominance across every candidate `(provider, model)` tuple reach
 - **Not this skill**: `opencode-model-router.overrides.jsonc` tier presets, fallback chains, router config → `design-fallback-chain`.
 - **Not this skill**: first-time `micode.json` creation or non-model fields (prompt, temperature, permissions).
 
-## Inventory — three live sources (never a static list)
+## Inventory — live sources (never a static list)
 
 1. **`~/.config/opencode/opencode.json`** — `plugin` array (normalize: strip npm scope and any `@version` suffix) + `provider.*` override keys.
 2. **`~/.local/share/opencode/auth.json`** — credential-keyed providers. A provider can exist here with **zero** `provider.*` entry (OAuth subscriptions, proxy-service keys); it still counts as configured.
 3. **The live catalog** — `opencode models` output. The provider prefixes here are the ground truth for "configured and working right now".
+4. **`opencode-quota show --json`** — when `@slkiser/opencode-quota` is installed: live per-provider quota/budget telemetry (see the classification section for the schema). Read-only — it never adds a provider to `configured_providers`; it grades the providers already discovered.
 
-`configured_providers` = union of the three. If a provider appears in `auth.json` but not in `opencode models`, its auth or plugin is broken — surface that rather than optimizing around it.
+`configured_providers` = union of the first three. If a provider appears in `auth.json` but not in `opencode models`, its auth or plugin is broken — surface that rather than optimizing around it.
 
 **Prerequisite**: `micode.json` exists. If missing, the micode plugin isn't installed — show the exact edit and offer via `confirm` to add `"micode@latest"` to the `plugin` array (always `@latest`, never a pinned version), then stop and let the user restart and re-run. Do not scaffold a micode.json by hand — that's micode's own job.
+
+**Recommended prerequisite (not a gate)**: `@slkiser/opencode-quota` upgrades quota claims from user-asserted to verified-live. Without it the skill still works — classification falls back to asking (below). If absent, offer via `confirm` to add `"@slkiser/opencode-quota@latest"` to the `plugin` array (companion auth plugins listed **before** it — ordering matters); optionally also `npm install -g @slkiser/opencode-quota@latest` (Node ≥ 22) for the terminal CLI. On decline, continue and label every quota claim **user-asserted**.
 
 ## Live data recheck — mandatory on every run
 
@@ -49,11 +54,17 @@ For each candidate `(provider, model)`:
    The live `opencode models <provider>` output is the **only** validity test. models.dev and provider docs can list models the session's cached catalog rejects (config-loader then warns `Model not available` at startup). `--refresh` may still serve the stale cache; the raw cache is `~/.cache/opencode/models.json`. The same provider key can also expose **different models under different auth modes** (OAuth subscription vs API key) — the live session is the arbiter.
 2. **Pricing**: fetch each provider's **current published pricing** (their pricing page or catalog endpoint). Record today's $/1M input and output. For subscriptions, record the quota mechanics (window length, pool size, throttle behavior, overage rules) — these matter more than list price.
 3. **Quality**: websearch **recent** (≤ ~90 days) benchmark comparisons between candidates, anchored to the current date (`"<model-a> vs <model-b>" coding <current month> <current year>`). Older results are yellow flags, not evidence.
-4. **Provenance**: in the output, mark each claim as verified-live-today vs. user-asserted. A future run must be able to spot drift.
+4. **Quota telemetry** (when the quota plugin is installed): read `opencode-quota show --json` and record per-provider `percentRemaining`, `window`, and `resetAt` from `resultType: "rate_limit"` + `renderType: "percent"` entries; `resultType: "balance"` + `renderType: "value"` is money remaining, not a quota percentage. `authority: "provider_reported"` = verified-live; anything else is approximate. Fresh install or idle session → `unavailable` until opencode has run with the plugin active.
+5. **Provenance**: in the output, mark each claim as verified-live-today vs. user-asserted. A future run must be able to spot drift.
 
-## Provider classification — ask, never assume
+## Provider classification — telemetry first, ask only for the gap
 
-Config files don't record whether a provider is a subscription or pay-per-token — the same provider key can back either. Ask once via `pick_many` over `configured_providers`: which are **subscription/bundled** (flat fee + quota), which **pay-per-token**, which **free** (no billing at all). All cost math runs over the user's classification + the live pricing fetch.
+Config files don't record whether a provider is a subscription or pay-per-token — the same provider key can back either. The quota plugin can, when it covers the provider. Classify in this order:
+
+1. **Telemetry first** (plugin installed): a provider with `status: "ok"` and a `rate_limit`/`percent` entry is a **quota-window subscription — verified-live** (`percentRemaining`, `window`, `resetAt`); a `balance`/`value` entry is **pay-per-token balance** (real money, not a percentage). Record `authority` as provenance. Map quota-plugin provider keys to configured provider keys with the same dynamic resolution rules (exact → unique substring → ask).
+2. **Ask about the rest**: providers `unavailable` in the telemetry (or with the plugin absent) may be pay-per-token, free, or unsupported — classify via one `pick_many` (subscription / pay-per-token / free). Never guess fees.
+
+All cost math runs over the verified classification + the live pricing fetch.
 
 Provider **classes** that shape the axes (identified from the live config, not a lookup table):
 
@@ -68,7 +79,7 @@ Subscription quota math needs the user's billing context: pool size, window leng
 
 ## Pareto logic
 
-Axes (all must be fetched live, per the recheck section): `cost` ($/1M, subscription-adjusted), `TTFT`, `quality` (reasoning benchmark class), `context window`, `quota impact`, `delegation reliability` (tool/subagent invocation fidelity — see the hard gate below). A tuple **dominates** another when it's at least as good on every axis and strictly better on one. Per agent:
+Axes (all must be fetched live, per the recheck section): `cost` ($/1M, subscription-adjusted), `TTFT`, `quality` (reasoning benchmark class), `context window`, `quota impact` (live `percentRemaining`/`resetAt` via telemetry when `authority: "provider_reported"`, else user-asserted), `delegation reliability` (tool/subagent invocation fidelity — see the hard gate below). A tuple **dominates** another when it's at least as good on every axis and strictly better on one. Per agent:
 
 1. Build the candidate set = every `(provider, model)` in `configured_providers` that clears the agent's constraint floor (next section).
 2. Compute the Pareto front.
@@ -107,6 +118,7 @@ Micode's entire value is orchestration: the lead agent must reliably **invoke su
 ## Special cases
 
 - **Subscription quota > sticker price**: when a subscription tuple is within ~20% on quality and wins cost by ≥3× after quota adjustment, prefer it for unattended fleet agents even if a pay-per-token tuple benchmarks higher.
+- **Near-exhausted subscription**: a subscription tuple whose live `percentRemaining` is low or whose `resetAt` has just passed a heavy workload is a poor fleet target *until the window refills* — deprioritize it for unattended agents in this run and note when to re-run. Without telemetry, this case relies on the user's assertion.
 - **Aggregators**: price at the upstream rate, but flag the added proxy hop and, for "free" tiers, the upstream quota cap.
 - **OAuth vs API-key catalogs differ** for the same provider key — a tuple validated in this session is valid for *this auth mode* only. Note it in the output when relevant.
 - **New-model lag**: a model announced on a pricing page but absent from the live catalog is not a candidate, period. Re-check on the next run.
@@ -129,7 +141,7 @@ Produce one swap table per agent group with columns:
 
 `Agent | Old tuple | New tuple | $/1M old | $/1M new | TTFT old | TTFT new | Quality class | Delegation (evidence) | Quota note | Verified live?`
 
-…then the Pareto reasoning (which axis the swap wins), then the applied diff summary. The command layer renders this and restarts micode.
+…then the Pareto reasoning (which axis the swap wins), then the applied diff summary. The Quota note column cites live telemetry (`percentRemaining`/`resetAt`, marked verified-live) when available, and states user-asserted otherwise. The command layer renders this and restarts micode.
 
 ## What this skill does NOT do
 

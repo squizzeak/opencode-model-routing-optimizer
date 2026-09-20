@@ -82,7 +82,9 @@ These are product decisions, not style. Do not regress them.
    provider lists, model IDs, alias tables, price tables, or benchmark
    rankings. Providers are discovered at run time from three live sources:
    `~/.config/opencode/opencode.json`, `~/.local/share/opencode/auth.json`,
-   and the `opencode models` session catalog. Model validity is judged
+   and the `opencode models` session catalog. Quota telemetry via the
+   optional `@slkiser/opencode-quota` plugin/CLI is a fourth, grading-only
+   source — it never contributes providers. Model validity is judged
    **only** by the live catalog (models.dev/docs are research, not truth;
    catalogs differ by auth mode).
 2. **Live rechecks every run.** Pricing, quota mechanics, and benchmark
