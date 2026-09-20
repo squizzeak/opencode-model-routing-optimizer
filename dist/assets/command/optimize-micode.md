@@ -1,91 +1,60 @@
 ---
-description: Audit and Pareto-optimize the `model` field for every agent in `~/.config/opencode/micode.json`. Compares against every candidate `(provider, model)` tuple in scope, swaps strictly-dominated assignments, leaves frontier models alone.
+description: Audit and Pareto-optimize micode.json model assignments across all configured providers. Fully dynamic — providers, models, prices, and benchmarks are pulled live at run time; nothing is hardcoded. Usage: /optimize-micode [quality|cost|ttft|two-tier|free] [scope]
 agent: commander
 ---
 
-<!-- routing-optimizer:version=0.1.3 -->
+<!-- routing-optimizer:version=0.1.4 -->
 
-# /optimize-micode
+Pareto-optimize the `model` field of every agent in `~/.config/opencode/micode.json` against every `(provider, model)` tuple reachable from the **live** opencode session. This command ships no provider lists, no model IDs, and no price tables — everything is discovered and re-verified at run time.
 
-You are running the `/optimize-micode` slash command. Your job is to audit and optimize the `model` assignments in `~/.config/opencode/micode.json` using Pareto dominance across all configured providers.
+## Prerequisites — check and offer, never silently refuse
 
-## Step 1 — Load the skill
+- `~/.config/opencode/micode.json` must exist. If not, micode isn't installed: show the exact edit and offer via `confirm` to add `"micode@latest"` to the `plugin` array in `~/.config/opencode/opencode.json` (always `@latest`, never pinned), then stop for a restart. Do not scaffold micode.json by hand.
 
-Load and follow the **`optimize-micode-models`** skill in its entirety. That skill contains the Pareto-dominance logic, the per-provider fetch recipe, the markup/discount handling, the provider latency overhead table, the two-tier architecture mapping, the output format, and the refusal rules. Do not duplicate any of that here — the skill is the source of truth.
+## Inventory — three live sources
 
-After loading, **return briefly to the user** with one line confirming the skill loaded, then proceed.
+1. `~/.config/opencode/opencode.json` → `plugin` array (normalize: strip scope/`@version`) + `provider.*` keys.
+2. `~/.local/share/opencode/auth.json` → credential-keyed providers (may have zero `provider.*` entries and still be configured).
+3. `opencode models` → the session's resolved catalog; its provider prefixes are the ground truth for "configured and working".
 
-## Step 2 — Parse `$ARGUMENTS`
+`configured_providers` = union of the three. Providers in `auth.json` but absent from `opencode models` are broken auth — surface, don't optimize around them.
 
-`$ARGUMENTS` is the full text the user typed after `/optimize-micode`. It may be empty. Parse it into:
+## Live recheck — mandatory, nothing from memory
 
-| Slot | Recognized values                                                                 | Default            |
-| ---- | --------------------------------------------------------------------------------- | ------------------ |
-| Constraint   | `quality` / `cost` / `ttft` / `two-tier` / `speed` / `interactive` / `free`    | `two-tier`         |
-| Provider scope | `opencode-go` / `direct` / `3rd-party` / `all` / a comma-separated provider list | `all` (i.e., `all configured`) |
+For every candidate tuple:
 
-Rules for parsing:
+1. **Validity (hard gate)**: must resolve in the live catalog — `opencode models <provider> | grep -x "<provider>/<model>"`. models.dev/docs are research, not validity; the session catalog wins. Same provider key can expose different models under different auth modes.
+2. **Pricing**: fetch the provider's **current** published pricing page; record today's $/1M in/out plus subscription quota mechanics (window, pool, throttle, overage).
+3. **Quality**: websearch recent (≤ ~90 days) benchmark comparisons, date-anchored to now.
+4. **Classification**: ask via `pick_many` which configured providers are subscription / pay-per-token / free — config can't tell. Never guess fees.
 
-- Empty `$ARGUMENTS` → both defaults.
-- One token → constraint if it matches a known value, else treat as provider scope.
-- Two or more tokens → first is constraint, rest is provider scope (or comma-separated list).
-- Provider lists like `openai,anthropic` are valid for scope; expand them to the `provider.*` keys in `~/.config/opencode/opencode.json`.
-- `free` constraint: maximize quality at strictly $0 marginal cost per token. Only candidates where the effective `$/1M = 0` AND no quota cap binds qualify. This is a narrow set — typically only truly free open-weight inference tiers (Hugging Face, etc.) or fully-unlimited subscription tiers. Subscription routes like opencode-go or GitHub Copilot do **NOT** qualify as `free` — they bundle quotas that may bind, and their effective cost is `monthly_fee / expected_monthly_tokens`, which the `cost` constraint evaluates via the markup table. If no candidate qualifies, `free` returns "no free routes in scope" and offers to fall back to `cost`.
-- Unrecognized values: ask the user once with `pick_one` before proceeding. Do not guess.
+## Constraint parsing from `$ARGUMENTS`
 
-If the user typed a free-form concern (e.g., "minimax retiring, find alternatives" or "deepseek quota is binding"), treat that as an extra constraint note to surface in step 3 alongside the standard constraint/scope.
+- `quality` — highest-benchmark-class picks within scope.
+- `cost` — cheapest picks that clear each agent's quality floor.
+- `ttft` — fastest-first-token picks for interactive agents.
+- `two-tier` (default) — lead/interactive → speed-optimized; unattended fleet → cost-optimized.
+- `free` — only $0 effective-cost tuples; verify each provider's free path with the user (true free vs. paid-overage fallback).
+- **Scope** (second token): `all` (default), `subscription`, `direct`, `free`, or an explicit comma-separated provider list drawn from `configured_providers` only.
 
-## Step 3 — Run the skill workflow
+Unknown or unresolvable scope tokens → `pick_one` from the actual configured providers. No aliases, no guesses.
 
-Execute every step of the `optimize-micode-models` skill in order:
+## Pareto test
 
-1. Read current state (`micode.json` + `opencode.json`).
-2. Use the constraint and provider scope parsed in step 2 above (do not re-ask).
-3. Fetch per-provider catalogs and pricing (TTL 24h).
-4. Compute Pareto dominance across every `(provider, model)` tuple in scope.
-5. Apply swaps in parallel via the `edit` tool.
-6. Validate JSON and provider-coverage.
+Axes: `cost` (subscription-adjusted), `TTFT`, `quality class`, `context window`, `quota impact`, `delegation reliability`. A tuple dominates another iff ≥ on every axis and > on one. Per agent: current assignment dominated → propose swap; on the front → keep. Subscription tuples within ~20% on quality that win cost ≥3× after quota adjustment are preferred for unattended fleet agents.
 
-For each step, follow the skill's instructions exactly — including the **refuse-and-surface** rules for unverified benchmarks, unconfigured providers, and markup-uncertain cost axes.
+**Delegation hard gate (lead only)**: micode is useless if the lead never spawns subagents. A candidate is disqualified for the commander slot without positive evidence it delegates under the orchestration prompt — observed sessions > live probe > recent community reports — regardless of wins on every other axis. For fleet agents, tool-use fidelity remains a plain axis.
 
-## Step 4 — Render output
+## Apply + validate
 
-After validation, print the skill's full output format:
+`Edit` only the `model` fields in `micode.json` — never prompt/temperature/permissions. Then the canary:
 
-1. JSON validation result + provider-coverage check.
-2. Swap summary table — agent, old `(provider/model)`, new `(provider/model)`, `←provider-switch` or `←same-provider` marker, dominance reason (one line).
-3. Net count.
-4. No-change agents (frontier under the user's constraint).
-5. **Would-dominate-if-configured** notes — separate table, do NOT apply.
-6. Restart reminder — "quit and restart opencode for changes to take effect".
+```bash
+opencode models 2>&1 | grep -i "not available" || echo "all models resolve"
+```
 
-If zero swaps are warranted, say so plainly: "config is Pareto-optimal under your constraint with the current catalog — no swaps recommended."
+Zero warnings required; a warned model gets reverted and re-picked from the provider's live list via `pick_one`.
 
-## Step 5 — Offer follow-ups
+## Output
 
-After rendering, briefly offer three next-step options via `pick_one`:
-
-- **Apply + restart** — apply any would-dominate-if-configured candidates if the user wants to provision keys; otherwise just confirm the applied swaps and remind them to restart opencode.
-- **Tighten scope** — re-run with a narrower provider scope or different constraint.
-- **Done** — exit the command.
-
-If the user picked "Done" or the conversation is wrapping, finish with a one-line summary of the net effect (e.g., "5 swaps applied across 23 agents — restart opencode for changes to take effect").
-
-## Argument examples
-
-- `/optimize-micode` — two-tier constraint, all configured providers.
-- `/optimize-micode cost` — minimum-cost constraint, all providers.
-- `/optimize-micode free` — maximize quality at strictly $0 marginal cost (rare; only unbundled free-tier routes). For bundled subscriptions (Copilot, opencode-go), use `cost` instead.
-- `/optimize-micode quality opencode-go` — quality-only constraint, opencode-go only.
-- `/optimize-micode direct` — two-tier constraint, direct first-party providers only.
-- `/optimize-micode openai,anthropic` — two-tier constraint, just openai + anthropic.
-- `/optimize-micode quality openai,anthropic,opencode-go` — explicit constraint + scope.
-
-## What this command does NOT do
-
-- Does not edit `~/.config/opencode/opencode.json` or any non-model field.
-- Does not provision API keys or register new providers.
-- Does not pick among trade-off frontier models unless the user explicitly stated a priority weighting in `$ARGUMENTS`.
-- Does not silently apply provider-switches off opencode-go — every swap table row shows the provider change.
-
-If `$ARGUMENTS` requests something outside the skill's scope (e.g., "rewrite my agent prompts" or "add a new subagent"), refuse and route the user back to the `customize-opencode` parent skill or to a fresh request.
+One swap table per agent group: `Agent | Old tuple | New tuple | $/1M old | $/1M new | TTFT old | TTFT new | Quality class | Delegation (evidence) | Quota note | Verified live?` — then Pareto reasoning per swap, the applied diff summary, and a restart reminder.

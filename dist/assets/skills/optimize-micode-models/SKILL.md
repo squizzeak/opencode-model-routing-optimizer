@@ -3,272 +3,138 @@ name: optimize-micode-models
 description: >-
   Use ONLY when auditing or optimizing model assignments in
   ~/.config/opencode/micode.json, including /optimize-micode, Pareto-optimal
-  model selection, provider pricing or latency comparisons, subscription quotas,
-  and agent model swaps. Compares (provider, model) tuples and recommends swaps
-  only when an alternative beats the current choice on every evaluated axis.
-  NOT for first-time micode.json creation, application code, or non-model config.
+  model selection, provider pricing or latency comparisons, subscription
+  quotas, agent model swaps, and lead-agent delegation reliability. Discovers
+  providers and models dynamically
+  from the live opencode session and rechecks live pricing/benchmark data on
+  every run. Compares (provider, model) tuples and recommends swaps only when
+  an alternative beats the current choice on every evaluated axis. NOT for
+  first-time micode.json creation, application code, or non-model config.
 ---
 
-<!-- routing-optimizer:version=0.1.3 -->
+<!-- routing-optimizer:version=0.1.4 -->
 
-# Optimize micode.json model assignments
+# Audit & Pareto-optimize micode model assignments
 
-Applies **Pareto-dominance analysis** to the `model` field across every agent in the user's global opencode config, comparing against every candidate **(provider, model)** tuple. Replaces strictly-dominated assignments with strictly-better ones, leaves frontier assignments alone.
+Computes Pareto dominance across every candidate `(provider, model)` tuple reachable from the user's **live** opencode session and swaps strictly-dominated assignments in `~/.config/opencode/micode.json`.
 
-## The Pareto test (the only logic this skill uses)
+**This skill is fully provider- and model-agnostic.** It ships no dominance tables, no preferred-provider lists, and no model IDs. Providers are discovered from the live session; models from the live catalog; prices and benchmark claims from live sources, rechecked on every run. Anything that looks like a provider or model name below is a placeholder, not a default.
 
-Each candidate is a **(provider, model)** tuple — the same model offered by two different providers counts as two candidates. Tuples are compared on **N axes** (default: quality, speed, cost, quota). Tuple A **Pareto-dominates** tuple B if A is strictly better on **every** axis the user cares about. If such an A exists, swap B → A. If no such A exists, leave B alone — it sits on the frontier under the user's stated constraint.
+## Scope boundaries
 
-Why provider matters: the same underlying model can have different effective price, latency, and quota on different providers. Example: `opencode-go/deepseek-v4-flash` and `deepseek/deepseek-v4-flash` are two separate candidates — opencode-go may add proxy latency and bundle pricing, deepseek-direct may charge list price with no markup, and either can Pareto-dominate the other depending on which axes matter.
+- **This skill**: static per-agent `model` assignments in `micode.json`.
+- **Not this skill**: `opencode-model-router.overrides.jsonc` tier presets, fallback chains, router config → `design-fallback-chain`.
+- **Not this skill**: first-time `micode.json` creation or non-model fields (prompt, temperature, permissions).
 
-Three categories:
+## Inventory — three live sources (never a static list)
 
-| Category                  | Action                                                                |
-| ------------------------- | --------------------------------------------------------------------- |
-| **Strictly-dominated** (loses on every axis)  | Swap to the dominant model immediately                                |
-| **Trade-off** (wins some axes, loses others)  | Leave alone — only swap if the user's constraint shifts                |
-| **Frontier** (no other model beats it on all axes)   | Leave alone                                                            |
+1. **`~/.config/opencode/opencode.json`** — `plugin` array (normalize: strip npm scope and any `@version` suffix) + `provider.*` override keys.
+2. **`~/.local/share/opencode/auth.json`** — credential-keyed providers. A provider can exist here with **zero** `provider.*` entry (OAuth subscriptions, proxy-service keys); it still counts as configured.
+3. **The live catalog** — `opencode models` output. The provider prefixes here are the ground truth for "configured and working right now".
 
-The skill's job is to find and apply the first category. It does not pick among trade-off options unless the user has explicitly stated a priority weighting.
+`configured_providers` = union of the three. If a provider appears in `auth.json` but not in `opencode models`, its auth or plugin is broken — surface that rather than optimizing around it.
 
-## Provider dimension
+**Prerequisite**: `micode.json` exists. If missing, the micode plugin isn't installed — show the exact edit and offer via `confirm` to add `"micode@latest"` to the `plugin` array (always `@latest`, never a pinned version), then stop and let the user restart and re-run. Do not scaffold a micode.json by hand — that's micode's own job.
 
-Every `model` value in `micode.json` carries a provider prefix: `provider/model-id`. The provider is a first-class variable in the Pareto calculation, not an implementation detail. A swap may change the model, the provider, or both — only the `(provider, model)` tuple matters.
+## Live data recheck — mandatory on every run
 
-### Default provider scope
+Model catalogs rotate weekly; pricing pages and benchmark rankings follow. **All pricing and quality data in this section is a hypothesis until re-verified against live sources during the run.** Nothing may be applied from memory, training data, or a previous session's output.
 
-Read `~/.config/opencode/opencode.json` and inventory every `provider.*` key with credentials configured. The default scope is **all configured providers** — the user usually wants to know "should I keep using opencode-go or switch to direct?". Narrowing happens only when the user explicitly asks.
+For each candidate `(provider, model)`:
 
-### How the user can override scope
+1. **Catalog validity** (hard gate): the tuple must resolve in the live session —
+   ```bash
+   opencode models <provider> 2>&1 | grep -x "<provider>/<model>"
+   ```
+   The live `opencode models <provider>` output is the **only** validity test. models.dev and provider docs can list models the session's cached catalog rejects (config-loader then warns `Model not available` at startup). `--refresh` may still serve the stale cache; the raw cache is `~/.cache/opencode/models.json`. The same provider key can also expose **different models under different auth modes** (OAuth subscription vs API key) — the live session is the arbiter.
+2. **Pricing**: fetch each provider's **current published pricing** (their pricing page or catalog endpoint). Record today's $/1M input and output. For subscriptions, record the quota mechanics (window length, pool size, throttle behavior, overage rules) — these matter more than list price.
+3. **Quality**: websearch **recent** (≤ ~90 days) benchmark comparisons between candidates, anchored to the current date (`"<model-a> vs <model-b>" coding <current month> <current year>`). Older results are yellow flags, not evidence.
+4. **Provenance**: in the output, mark each claim as verified-live-today vs. user-asserted. A future run must be able to spot drift.
 
-Interactive providers (the user picks at invocation time):
+## Provider classification — ask, never assume
 
-| Scope                              | When to use                                                                  |
-| ---------------------------------- | ---------------------------------------------------------------------------- |
-| `opencode-go` only (default before) | User wants to optimize within the current provider only                      |
-| `direct` only                      | User wants to evaluate direct providers (openai, anthropic, deepseek, etc.)  |
-| `3rd-party` only                   | User wants to evaluate aggregators (OpenRouter, AnyScale, etc.)              |
-| `all configured`                   | User wants the global Pareto frontier across every provider they have creds for |
+Config files don't record whether a provider is a subscription or pay-per-token — the same provider key can back either. Ask once via `pick_many` over `configured_providers`: which are **subscription/bundled** (flat fee + quota), which **pay-per-token**, which **free** (no billing at all). All cost math runs over the user's classification + the live pricing fetch.
 
-When the user does not state a scope, default to **`all configured`**. Always confirm before fetching catalogs — pulling 8 providers' pricing is wasteful if the user only cares about openai vs opencode-go.
+Provider **classes** that shape the axes (identified from the live config, not a lookup table):
 
-### Provider-availability constraint
+| Class                  | How to recognize it                                   | Axis notes                                                                 |
+| ---------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------- |
+| Direct API             | Provider's own endpoint, per-token pricing            | True $/1M; typically lowest TTFT for its models                            |
+| Bundled subscription   | Flat fee + quota window (user-confirmed)              | Effective $/1M ≈ $0 until the quota window trips; then throughput collapses |
+| Aggregator             | One endpoint fronting many upstreams                  | Adds a proxy hop (~+100–300 ms TTFT typically); free tiers are aggregated upstreams and still quota-capped |
+| Free tier              | No billing at all (user-confirmed)                    | $0 but daily rate-limited; quality varies by upstream                      |
 
-A swap is only valid if the target provider is **already configured with credentials** in `~/.config/opencode/opencode.json` (i.e., has a `provider.<name>.options.apiKey` or equivalent). Never recommend a provider the user hasn't set up — that would require them to provision API keys first, which is a separate workflow.
+Subscription quota math needs the user's billing context: pool size, window length, what happens on exhaustion (throttle vs. paid overage). Ask; never guess.
 
-If the Pareto frontier requires a provider the user hasn't configured, surface it as a **"would-dominate-if-configured"** note in the output (separate from the applied swaps) so the user can decide whether to provision keys.
+## Pareto logic
 
-## Workflow
+Axes (all must be fetched live, per the recheck section): `cost` ($/1M, subscription-adjusted), `TTFT`, `quality` (reasoning benchmark class), `context window`, `quota impact`, `delegation reliability` (tool/subagent invocation fidelity — see the hard gate below). A tuple **dominates** another when it's at least as good on every axis and strictly better on one. Per agent:
 
-### 1. Read current state
+1. Build the candidate set = every `(provider, model)` in `configured_providers` that clears the agent's constraint floor (next section).
+2. Compute the Pareto front.
+3. If the current assignment is dominated → propose swap.
+4. If the current assignment is on the front → keep, even if a "better on one axis" alternative exists.
 
-Read `~/.config/opencode/micode.json` and inventory every agent's `model` field. Group by current model so dominance is computed once per unique model, not per agent.
+## Constraint semantics
 
-```bash
-python3 -c "import json; d = json.load(open('/Users/squizzeak/.config/opencode/micode.json')); \
-  from collections import Counter; \
-  c = Counter(a['model'] for a in d['agents'].values()); \
-  [print(f'{m}: {n}') for m, n in c.most_common()]"
-```
+Parsed from `$ARGUMENTS` or via `ask_text`/`pick_many`:
 
-### 2. Confirm or extract the user's constraint
+- **`quality floor`** — minimum benchmark class the agent needs (lead and heavy reasoning agents: highest class; trivial-read agents: any).
+- **`cost ceiling`** — max $/1M (after subscription adjustment) the agent may draw.
+- **`TTFT`** — max first-token latency for interactive agents; unattended agents may exceed it.
+- **`two-tier`** (default) — interactive agents → speed-optimized pick; unattended agents → cost-optimized pick.
+- **`free`** — only $0 effective-cost tuples (bundled quota remaining + free tiers); check whether each provider's free path is truly free or falls back to paid overage — verify with the user.
+- **scope** — `all` (default), a class filter (`subscription` / `direct` / `free`), or an explicit provider list drawn from `configured_providers`.
 
-If the user hasn't stated a constraint, ask once. The constraint determines which axes matter:
+## Two-tier doctrine (micode default)
 
-| Constraint                              | Axes that matter                                                              |
-| --------------------------------------- | ----------------------------------------------------------------------------- |
-| Speed where interaction is required, quality where unattended (default for this user) | quality, speed, cost, quota — applied per agent class (interactive vs unattended) |
-| Maximum quality regardless of cost      | quality only (Opus 5 / Qwen3-Max tier wins)                                   |
-| Minimum cost regardless of quality      | cost only (cheap tier wins)                                                   |
-| Best TTFT for chat                      | TTFT, then quality                                                            |
+The default micode architecture separates the lead/orchestrator (interactive, every message) from unattended fleet agents:
 
-The default for `micode.json` is the first row. Don't assume it — confirm if ambiguous.
+- The **lead** must clear the TTFT and quality floor — it's user-visible on every turn. It must also pass the **delegation hard gate** (next section) — a non-delegating lead is disqualified outright.
+- The **fleet** can ride the cheapest adequate tuple, including subscription quota, since nobody watches its latency.
 
-The constraint also implicitly selects a **provider scope** (see Provider dimension above). Two clarifications worth asking in one batch:
+This is why two different tuples routinely coexist in a healthy `micode.json`.
 
-1. **Constraint** — quality / cost / TTFT / two-tier (default).
-2. **Provider scope** — `all configured` (default) / `opencode-go only` / `direct only` / `3rd-party only` / a specific list.
+## Delegation reliability — the micode hard gate
 
-If the user says "compare openai vs anthropic" the scope is implicitly `[openai, anthropic]`. If they say "should I leave opencode-go?" the scope is `[opencode-go, <all direct>]`. Infer when unambiguous; ask when not.
+Micode's entire value is orchestration: the lead agent must reliably **invoke subagents** (spawn Task-tool agents per its system prompt) instead of answering everything inline. A model that benchmarks well but never delegates makes the fleet useless — no planner, no executor, no reviewer, regardless of what they're assigned. Treat this as a distinct evaluation dimension, not a footnote to "quality":
 
-### 3. Load the Pareto-dominance map (per provider)
+- **Hard gate for the lead/orchestrator**: a candidate is **disqualified for the commander slot** without positive evidence it delegates under the harness's orchestration prompt — no matter how far it wins on cost, TTFT, or benchmarks. This gate overrides the Pareto result.
+- **Evidence, strongest first**: (1) observed behavior in the user's own sessions — did the lead spawn subagents when the task clearly called for delegation?; (2) a live probe — run the candidate as lead in a scratch session with a task that obviously demands delegation and watch whether it spawns; (3) recent (≤ ~90 days) community reports, date-anchored.
+- **Fleet agents** are leaf workers, so subagent-spawning matters less — but **tool-use fidelity** (function-calling reliability, schema adherence, retry behavior) is still a Pareto axis for them: a fleet agent that fumbles tool calls fails its assignments.
+- **Record findings** in the output's Delegation column + provenance notes, with the evidence class (observed / probed / reported). Findings decay like prices — a model update can fix or break delegation, so re-verify every run.
 
-The map changes every time any provider rotates models. **Always re-verify before recommending swaps.** For each provider in scope, fetch the current catalog and pricing. Suggested sources:
+## Special cases
 
-- **opencode-go**: Context7 or fetch `https://julien.cloud/opencode-go-models` (TTL 24h via ctx_fetch_and_index).
-- **openai, anthropic, google, xai, deepseek, zai, moonshot, minimax**: their published pricing pages — fetch with `ctx_fetch_and_index` (TTL 24h). Cross-check at least two providers with Context7 where the docs are stable.
-- **3rd-party aggregators** (OpenRouter, AnyScale, etc.): their `/models` endpoints or pricing pages. OpenRouter exposes a JSON API at `https://openrouter.ai/api/v1/models` — useful for one-shot pricing snapshots.
-- **Provider latency benchmarks**: there is no canonical source. Default to the per-provider overheads table below; allow user override if they have measured TTFT from logs.
+- **Subscription quota > sticker price**: when a subscription tuple is within ~20% on quality and wins cost by ≥3× after quota adjustment, prefer it for unattended fleet agents even if a pay-per-token tuple benchmarks higher.
+- **Aggregators**: price at the upstream rate, but flag the added proxy hop and, for "free" tiers, the upstream quota cap.
+- **OAuth vs API-key catalogs differ** for the same provider key — a tuple validated in this session is valid for *this auth mode* only. Note it in the output when relevant.
+- **New-model lag**: a model announced on a pricing page but absent from the live catalog is not a candidate, period. Re-check on the next run.
 
-The known map as of Sept 2026 (treat as baseline; verify with fresh fetch — these were verified on opencode-go, cross-provider dominance requires fresh per-provider fetch):
+## Application + validation
 
-| Dominant model | Dominates        | Why                                                                                                                          |
-| -------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| V4-Flash       | V4-Pro           | Higher quality (TB2.1 90.6 vs 87.9) + 2.1× faster + 8× cheaper input + ~7× quota. V4-Pro retires Sept 14, 2026 and routes to V4.1-Flash at the same price — paying for the older, slower model. |
-| V4-Flash       | GLM-5.3          | Higher quality + faster + cheaper on every axis                                                                               |
-| V4-Flash       | deepseek-v3.5    | Newer gen, wins on quality + speed + cost                                                                                     |
-| V4-Flash       | Kimi-K2          | Newer gen, wins on quality + speed + cost                                                                                     |
-| V4-Flash       | GLM-4.6          | Older Zhipu gen                                                                                                              |
-| V4-Flash       | minimax-m2       | Older MiniMax gen                                                                                                            |
-| M3             | minimax-m2       | Faster streaming, higher quality                                                                                             |
-| Luna           | any old "small" model that loses on TTFT | Best TTFT in catalog at sufficient quality tier |
+Apply swaps with `Edit` against `~/.config/opencode/micode.json`, exact-match the old model string. Touch **only** the `model` field — never prompt, temperature, or permissions.
 
-**Always verify each dominance claim with fresh benchmark data before applying.** Models that were dominated last month may have closed the gap; models that were frontier last month may now be dominated.
-
-### 4. Map agents to Pareto-dominance candidates
-
-For each unique `(provider, model)` tuple currently in the config, check whether any candidate tuple within scope strictly dominates it. If yes, propose the swap (the new tuple may differ from the current one in provider, model, or both). If no, the current tuple is on the frontier under the user's constraint — leave it.
-
-Special cases:
-
-- **brainstormer / interactive Q&A**: speed axis includes TTFT, not just tok/s. Luna beats M3 on TTFT; M3 beats Luna on streaming. Both are frontier — leave unless the user has expressed a clear TTFT-vs-streaming preference.
-- **Subagents with quota constraints**: V4-Flash has ~7× the subagent quota of V4-Pro. If a model has a quota cap that's binding on unattended work, quota is a first-class axis.
-- **Retirement warnings**: if a model is retired or scheduled to retire (e.g., V4-Pro on Sept 14, 2026), flag it as dominated regardless of benchmark parity — paying premium for an EOL model is a strictly worse trade.
-- **Provider-switch dominance**: an agent currently on `opencode-go/X` may be dominated by `direct/X` if direct is cheaper/faster with the same quality, OR dominated by `opencode-go/Y` if a different model on the same provider beats it. Both kinds of swap are valid.
-- **Quota caps that bind only one provider**: a model may have a generous quota on opencode-go but a tight cap on direct (or vice versa). When quota binds, swap to the provider where the cap is not the binding constraint.
-
-### 5. Apply edits
-
-Use the `edit` tool in parallel for independent swaps. Keep the diff surgical — only change the `model` field, preserve every other field (`description`, `prompt`, `permission`, etc.) exactly.
-
-The `model` field format is always `<provider>/<model-id>`. A swap may change either half: same provider different model (`opencode-go/v4-pro` → `opencode-go/v4-flash`), different provider same model (`opencode-go/deepseek-v4-flash` → `deepseek/deepseek-v4-flash`), or both. Group parallel edits by oldString uniqueness to avoid edit collisions.
-
-### 6. Validate
+Then run the canary — every model referenced anywhere in the merged config must resolve in the live session:
 
 ```bash
-python3 -c "import json; d = json.load(open('/Users/squizzeak/.config/opencode/micode.json')); print('JSON valid'); print(f'{len(d[\"agents\"])} agents')"
+opencode models 2>&1 | grep -i "not available" || echo "all models resolve"
 ```
 
-Then sanity-check that every `model` value references a configured provider:
-
-```bash
-python3 -c "import json, re; \
-  cfg = json.load(open('/Users/squizzeak/.config/opencode/opencode.json')); \
-  providers = set(cfg.get('provider', {}).keys()); \
-  mic = json.load(open('/Users/squizzeak/.config/opencode/micode.json')); \
-  bad = [(a, m['model']) for a, m in mic['agents'].items() if m['model'].split('/')[0] not in providers]; \
-  print(f'providers configured: {sorted(providers)}'); \
-  print(f'agents referencing unconfigured providers: {bad if bad else \"none\"}')"
-```
-
-Then print a summary table: agent, old `(provider/model)`, new `(provider/model)`, dominance reason.
-
-Finally, **tell the user to quit and restart opencode** — config is loaded once at startup, not hot-reloaded.
-
-## Per-provider pricing & speed
-
-A model offered by N providers has N separate `(provider, model)` candidates. The skill needs price, latency, and quota per candidate. Where to look:
-
-| Provider class     | Examples                                    | Pricing source                                                                | Speed source                                                  | Quota source                                          |
-| ------------------ | ------------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------- | ----------------------------------------------------- |
-| opencode proxy     | `opencode-go`                               | opencode-go catalog (`https://julien.cloud/opencode-go-models`)              | opencode-go status / your logged TTFT                         | opencode-go account page                              |
-| Direct first-party | `openai`, `anthropic`, `google`, `xai`, `deepseek`, `zai`, `moonshot`, `minimax` | Provider's published pricing page (fetch via `ctx_fetch_and_index`, TTL 24h)   | Provider's published benchmarks; your measured TTFT preferred | Provider's account dashboard                          |
-| 3rd-party aggregators | `openrouter`, `anyscale`, etc.            | Aggregator's `/models` endpoint or pricing page                               | Aggregator's published latency stats; your measured TTFT preferred | Aggregator's rate limit doc; your account dashboard   |
-| Bundled / subscription | `github-copilot`                        | Free with existing subscription (effective cost = 0)                          | Backend provider's TTFT (model runs elsewhere)                 | Subscription tier caps                                  |
-
-### Fetch recipe
-
-For each provider in scope, run one `ctx_fetch_and_index` (TTL 24h, parallelism 3-5) for the pricing page, and one for any published latency benchmarks. If the provider exposes a JSON catalog (OpenRouter does), prefer that over HTML scraping.
-
-After fetching, **normalize** the data into a single table with columns:
-
-```
-(provider, model, input_$/1M, output_$/1M, ttft_p50_ms, tok/s_p50, quota_rpm_or_tpm, available)
-```
-
-`available` is `False` if the provider isn't configured in the user's `opencode.json`. Pareto analysis runs over rows where `available=True`; `available=False` rows surface as **would-dominate-if-configured** notes.
-
-## Markup & discount handling
-
-Pricing models fall into three categories — only the first two have a per-token `markup_factor`:
-
-| Pricing model              | Examples                                  | Effective `$/1M` formula                                              | Per-token markup |
-| -------------------------- | ----------------------------------------- | --------------------------------------------------------------------- | ---------------- |
-| **Pay-per-token**          | openai API, anthropic API, google API, deepseek API, etc. | `list_input_price + (list_output_price * expected_output_ratio)` | 1.0× (list) — may be 1.05×–1.10× on aggregators |
-| **Flat-rate subscription** | opencode-go, GitHub Copilot, ChatGPT Plus API (where applicable) | `monthly_fee / expected_monthly_tokens` (user-supplied); $0 marginal within bundled quota | n/a — not a multiplier |
-| **Truly free tier**        | Hugging Face free inference, open-weight providers with no billing | `0` — only valid if no rate cap binds                                  | 0.0×             |
-
-Why this matters:
-
-- A flat-rate subscription is **NOT** "free" — at low utilization, the `monthly_fee / expected_tokens` term dominates and effective `$/1M` can be very high. At high utilization, it can beat any pay-per-token route. The Pareto dominance calculation only works if you compute effective `$/1M` correctly.
-- A subscription that bundles a quota cap is **NOT equivalent** to unlimited $0/token access — when the quota binds, the candidate is dominated by a pay-per-token equivalent (assuming you can fall back to one).
-- "Free" only applies to the third category. The `free` constraint filters to those candidates; `cost` evaluates everything via the effective `$/1M` formula above.
-
-How to apply:
-
-1. For pay-per-token routes: fetch list price, apply markup factor (1.0× for direct, current rate for aggregators from their pricing API), record as effective `$/1M`.
-2. For flat-rate subscription routes: ask the user for `monthly_fee` and `expected_monthly_tokens` (default to user's last-30-days usage if available from logs), compute effective `$/1M`. If the user hasn't supplied these, surface the candidate as `usage_unknown` and exclude from automatic swaps.
-3. For truly free tiers: effective `$/1M = 0`. Verify the rate cap doesn't bind at expected usage before recommending.
-4. Pareto dominance on the cost axis uses the **effective** price, not the list price.
-
-**Never guess** `monthly_fee`, `expected_monthly_tokens`, or a markup factor. If the source is uncertain, fall back to 1.0× and flag the candidate as `markup_uncertain: true` so the user knows the dominance claim assumes list price.
-
-## Provider latency overhead
-
-The same model can have very different TTFT on different providers due to proxy/routing overhead. Baseline as of Sept 2026 (treat as starting point; always prefer user-measured values if available):
-
-| Provider route              | Typical added TTFT | Typical tok/s          | Notes                                                            |
-| --------------------------- | ------------------ | ---------------------- | ---------------------------------------------------------------- |
-| Direct first-party (US/EU regions) | ~baseline          | ~baseline              | Lowest possible TTFT, but varies by region and time of day       |
-| opencode-go proxy           | +50–150 ms         | comparable to direct   | Proxy adds routing overhead; quality and quota bundled           |
-| OpenRouter and aggregators  | +100–400 ms        | often comparable or slightly lower | Variable by upstream chosen                                    |
-| GitHub Copilot              | +100–300 ms        | comparable             | Routes to underlying provider; bundled with subscription         |
-
-The skill does not memorize these — it uses them as **defaults when no measured data is available**. If the user has logged TTFT from their own runs, those values override the defaults. Always tell the user to verify TTFT for interactive agents (brainstormer, commander) — provider latency has a bigger impact there than on unattended work.
-
-### Quota-by-provider
-
-Some providers apply per-account rate limits that differ by model and tier. opencode-go bundles a generous subagent quota (~7× what V4-Pro had); direct providers typically charge per-token with rate-limit headers but no per-day cap; 3rd-party aggregators vary. Treat quota as a binary axis for Pareto dominance — if a candidate hits its quota cap in normal use, it's strictly dominated by an equivalent candidate without that cap.
-
-## Two-tier architecture (the user's constraint)
-
-The user runs a two-tier setup by default:
-
-| Tier                | Agents                                                                                                | Target axes                |
-| ------------------- | ----------------------------------------------------------------------------------------------------- | -------------------------- |
-| **Interactive**     | commander, brainstormer, project-initializer, ledger-creator, mm-orchestrator, M3-class interactive agents | speed (streaming + TTFT), quality floor |
-| **Unattended**      | planner, executor, implementer, reviewer, all 14 `@fast` subagents                                    | quality, speed, cost, quota              |
-
-When in doubt about a specific agent's tier, the rule is: **does this agent's output reach the user directly (interactive) or feed into another agent (unattended)?** If interactive → speed-first (TTFT matters most here, so prefer providers with low latency overhead). If unattended → quality-first (cost and quota matter more than TTFT; provider choice can optimize for either).
-
-### Provider implications per tier
-
-- **Interactive agents**: prefer direct first-party routes when TTFT matters and the user has credentials. If the user is on opencode-go and the proxy overhead is a noticeable fraction of TTFT (interactive work is short), flag the swap to direct as a candidate. Don't swap if the proxy overhead is small relative to total response time.
-- **Unattended agents**: cost and quota dominate. Aggregators with bulk discounts (and Copilot bundle if applicable) often Pareto-dominate here even when they have higher TTFT, because the unattended agent doesn't care about latency.
+Zero warnings is the acceptance test. If a swapped-in model warns, it wasn't actually in the live catalog — revert that row and re-pick via `pick_one` from the provider's live list.
 
 ## Output format
 
-After applying swaps, print:
+Produce one swap table per agent group with columns:
 
-1. **JSON validation** result + provider-coverage check (none referencing unconfigured providers).
-2. **Swap summary table** — agent, old `(provider/model)`, new `(provider/model)`, dominance reason (one line each). When the provider changed, mark the row with `←provider-switch`; when only the model changed, mark `←same-provider`.
-3. **Net count** — e.g., "5 swaps applied across 23 agents (3 provider-switches, 2 same-provider upgrades)".
-4. **No-change agents** — list those that already sat on the frontier, briefly: "remaining models are frontier under your constraint with the providers in scope".
-5. **Would-dominate-if-configured notes** — candidates that Pareto-dominate the current assignment but require a provider the user hasn't set up. Print as a separate table with `(provider/model, agent it would replace, what credentials to add)`. Do NOT apply these — surface them so the user can decide whether to provision keys.
-6. **Restart reminder** — "quit and restart opencode for changes to take effect".
+`Agent | Old tuple | New tuple | $/1M old | $/1M new | TTFT old | TTFT new | Quality class | Delegation (evidence) | Quota note | Verified live?`
 
-If zero swaps are warranted, say so plainly: "config is Pareto-optimal under your constraint with the current catalog — no swaps recommended."
+…then the Pareto reasoning (which axis the swap wins), then the applied diff summary. The command layer renders this and restarts micode.
 
 ## What this skill does NOT do
 
-- Does not invent benchmarks or quote numbers it hasn't verified. Freshness wins over confidence.
-- Does not pick among trade-off frontier models unless the user has explicitly stated a priority weighting.
-- Does not touch any non-model field in `micode.json` (prompts, permissions, descriptions stay byte-identical).
-- Does not modify opencode.json (the main config), agent files in `.opencode/agent/`, or any other config file. (It may *read* `opencode.json` to discover configured providers, but never edits it.)
-- Does not create new agents, prompts, or skill files — only swaps the `model` field on existing agents.
-- Does not register new plugins, MCP servers, or provider credentials. If Pareto dominance requires a provider the user hasn't configured, surface as a note; never silently provision.
-- Does not apply provider-switches without showing them clearly in the swap table. The user must opt in to leaving opencode-go.
-
-If the user's request expands beyond model swaps, route to the parent `customize-opencode` skill or escalate to the user.
-
-## When to refuse
-
-Refuse to apply a swap if:
-
-- The dominance claim cannot be verified against fresh benchmark data (don't ship guesses).
-- The swap would change an agent's behavior in a way the user has not opted into (e.g., moving a frontier model to a strictly-different trade-off).
-- The target provider is not configured in `~/.config/opencode/opencode.json` — surface as a would-dominate-if-configured note instead of applying.
-- The markup factor is uncertain (no published rate available) and the cost axis is the deciding one — flag the swap as `markup_uncertain` and require explicit user confirmation.
-- The JSON fails validation after the edit — roll back and surface the parse error.
-
-Surface the conflict to the user with the dominance evidence and let them decide.
+- Does **not** design tier presets or fallback chains — that's `design-fallback-chain`.
+- Does **not** create a first-time `micode.json` or scaffold micode.
+- Does **not** install plugins or register credentials silently — prerequisite gaps surface as an exact edit + an explicit `confirm` first; plugin entries are always `@latest`.
+- Does **not** hardcode providers, aliases, or model IDs, and never applies pricing/benchmark numbers from memory — live sources on every run, provenance recorded.
+- Does **not** touch non-model fields in `micode.json`.

@@ -35,31 +35,28 @@ opencode's plugin loader supports three ways to reference a plugin
 
 | Path | How |
 | --- | --- |
-| **A. npm package** | Listed in `~/.config/opencode/opencode.json` `plugin: [...]`; Bun installs it at startup into `~/.cache/opencode/node_modules/` |
+| **A. `plugin` stanza (recommended)** | One line in `~/.config/opencode/opencode.json`; Bun resolves and installs the npm package at startup. No separate install command. |
 | **B. GitHub reference** | Same `plugin: [...]` entry, but `github:owner/repo` — Bun clones and installs straight from the repo, no npm publish needed |
 | **C. local plugin directory** | Drop the built file into `~/.config/opencode/plugins/` (project: `.opencode/plugins/`) |
 
-Pick whichever applies. Path A is the most convenient for end users.
-Path B installs the latest commit from this repo directly — handy for
-testing unreleased changes without publishing to npm. Path C is the
-lightest for local development.
+### Path A — `plugin` stanza (recommended)
 
-### Path A — npm (for end users)
-
-```sh
-bun add -g opencode-model-routing-optimizer
-```
-
-Then add it to your opencode config (`~/.config/opencode/opencode.json`):
+Add one line to `~/.config/opencode/opencode.json`:
 
 ```jsonc
 {
   "plugin": [
     ...,
-    "opencode-model-routing-optimizer"
+    "opencode-model-routing-optimizer@latest"
   ]
 }
 ```
+
+That's the whole install. On the next startup, Bun resolves the package
+from npm into `~/.cache/opencode/node_modules/` and opencode loads it —
+no `bun add`, no global install, no build step. Pinning `@latest` (or
+leaving the name bare) keeps you on the newest release; avoid version
+pins so skills pick up catalog and behavior fixes automatically.
 
 Restart opencode. The four files (`SKILL.md`s and `.md` commands) get
 copied into `~/.config/opencode/skills/` and `~/.config/opencode/command/`
@@ -134,7 +131,7 @@ ls ~/.config/opencode/skills/optimize-micode-models/SKILL.md \
 Each file should contain a line near the top:
 
 ```html
-<!-- routing-optimizer:version=0.1.2 -->
+<!-- routing-optimizer:version=0.1.4 -->
 ```
 
 That marker is what tells the plugin whether to overwrite on upgrade.
@@ -153,28 +150,47 @@ rm    ~/.config/opencode/command/design-fallback-chain.md
 
 ## How the two skills differ
 
+Both skills are **fully dynamic** — neither ships provider lists, model
+IDs, alias tables, or price data. Every run discovers the environment
+live and re-verifies its inputs.
+
 **`optimize-micode-models`** (static, per-agent, every start)
 
 - Operates on `~/.config/opencode/micode.json`.
-- Computes Pareto dominance across every candidate `(provider, model)`
-  tuple and swaps strictly-dominated assignments.
-- Defaults to a two-tier constraint: speed-where-interactive,
-  cost-where-unattended, all configured providers in scope.
-- Refuses to silently substitute off opencode-go — every swap table row
-  shows the provider change.
+- Discovers configured providers from three live sources —
+  `opencode.json`, the auth store, and the `opencode models` session
+  catalog — and validates every candidate tuple against the live catalog.
+- Rechecks **live pricing and recent benchmarks on every run**; nothing
+  is applied from memory, and each claim carries provenance
+  (verified-live vs. user-asserted).
+- Computes Pareto dominance across cost / TTFT / quality / context /
+  quota-impact / delegation-reliability and swaps only strictly-dominated
+  assignments.
+- Enforces a **delegation hard gate** for the lead agent: a model that
+  doesn't reliably invoke subagents is disqualified for the commander
+  slot regardless of its other wins — micode is useless if the lead
+  never delegates.
+- Offers to install missing prerequisites (e.g. micode itself) with the
+  exact edit shown and explicit consent — never silently.
 
 **`design-fallback-chain`** (dynamic, per-task, runtime routing)
 
 - Operates on `~/.config/opencode/opencode-model-router.overrides.jsonc`.
-- Composes a `presets.<name>` block + a `fallback.global` chain, with the
-  `sub-<cheap>-<heavy>` shape as the default. Friendly provider aliases
-  (`claude` → `anthropic`, `codex` → `openai`, `copilot` →
-  `github-copilot`, etc.) resolve against the user's configured
-  providers.
-- Defaults to the cheapest bundled subscription as the `@fast` tier and
-  the largest subscription as `@heavy`.
-- Refuses — does not silently substitute — when a requested provider
-  isn't in `opencode.json`. Surfaces the missing-credential recipe.
+- Resolves provider tokens **against your configured providers only** —
+  exact match, then unique substring, then an interactive pick. There is
+  no baked-in alias table; the configured set is the entire universe.
+- Validates every model against the live `opencode models` catalog
+  (which can differ by auth mode) and rechecks live pricing + benchmarks
+  before assigning tiers.
+- Checks prerequisites (router plugin, provider auth) and **offers to
+  install what's missing** — plugin entries always as `@latest`,
+  credentials only after you supply them — instead of refusing outright.
+- Composes a `presets.<name>` block + a `fallback.global` chain in the
+  `sub-<cheap>-<heavy>` shape: cheapest bundled route for `@fast`/lead,
+  largest subscription reserved for `@heavy`, chains terminating at an
+  explicitly free endpoint when one exists.
+- Surfaces the plugin's honest gaps (no quota-window awareness, no
+  lead auto-recovery) and the manual `/preset` workaround.
 
 Both skills publish their full output (validation, swap/reasoning
 tables, restart reminders) in the command's render and never apply

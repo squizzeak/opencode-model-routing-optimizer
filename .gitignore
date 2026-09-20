@@ -17,3 +17,7 @@ npm-debug.log*
 
 # npm cache (in case publish is run locally)
 .npm/
+
+# agent session artifacts
+.lcm/
+thoughts/
