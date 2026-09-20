@@ -3,7 +3,7 @@ description: Audit and Pareto-optimize micode.json model assignments across all 
 agent: commander
 ---
 
-<!-- routing-optimizer:version=0.2.0 -->
+<!-- routing-optimizer:version=0.2.1 -->
 
 Pareto-optimize the `model` field of every agent in `~/.config/opencode/micode.json` against every `(provider, model)` tuple reachable from the **live** opencode session. This command ships no provider lists, no model IDs, and no price tables — everything is discovered and re-verified at run time.
 

@@ -131,7 +131,7 @@ ls ~/.config/opencode/skills/optimize-micode-models/SKILL.md \
 Each file should contain a line near the top:
 
 ```html
-<!-- routing-optimizer:version=0.2.0 -->
+<!-- routing-optimizer:version=0.2.1 -->
 ```
 
 That marker is what tells the plugin whether to overwrite on upgrade.

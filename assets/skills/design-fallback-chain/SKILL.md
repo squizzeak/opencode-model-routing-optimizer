@@ -13,7 +13,7 @@ description: >-
   consent. Does NOT modify micode.json or silently provision credentials.
 ---
 
-<!-- routing-optimizer:version=0.2.0 -->
+<!-- routing-optimizer:version=0.2.1 -->
 
 # Design a subscription-aware routing config
 

@@ -14,7 +14,7 @@ description: >-
   first-time micode.json creation, application code, or non-model config.
 ---
 
-<!-- routing-optimizer:version=0.2.0 -->
+<!-- routing-optimizer:version=0.2.1 -->
 
 # Audit & Pareto-optimize micode model assignments
 
