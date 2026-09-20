@@ -3,7 +3,7 @@ description: Audit and Pareto-optimize micode.json model assignments across all 
 agent: commander
 ---
 
-<!-- routing-optimizer:version=0.2.2 -->
+<!-- routing-optimizer:version=0.2.3 -->
 
 Pareto-optimize the `model` field of every agent in `~/.config/opencode/micode.json` against every `(provider, model)` tuple reachable from the **live** opencode session. This command ships no provider lists, no model IDs, and no price tables — everything is discovered and re-verified at run time.
 
@@ -29,7 +29,7 @@ For every candidate tuple:
 2. **Pricing**: fetch the provider's **current** published pricing page; record today's $/1M in/out plus subscription quota mechanics (window, pool, throttle, overage).
 3. **Quality**: websearch recent (≤ ~90 days) benchmark comparisons, date-anchored to now.
 4. **Quota telemetry** (when the quota plugin is installed): read `opencode-quota show --json`; record `percentRemaining`, `window`, and `resetAt` from `resultType: "rate_limit"` + `renderType: "percent"` entries (`balance`/`value` is money remaining, not a quota percentage). `authority: "provider_reported"` = verified-live; fresh install or idle session → `unavailable` until opencode has run with the plugin active.
-5. **Classification**: telemetry first, scoped web lookup, then confirm — a provider with `status: "ok"` and a `rate_limit`/`percent` entry is a **quota-window subscription** (verified-live); a `balance`/`value` entry is **pay-per-token balance**. For providers the telemetry doesn't cover — and presumed subscriptions whose quota mechanics are unknown — look the gap up on the internet before asking: fetch the provider's **current published pricing/limits pages**, with every query scoped to **the plan the user is actually signed up for**, and determine exactly (1) whether that plan carries a usage quota (quota windows/pools vs. pure pay-per-token) and its limits and (2) the **overage behavior** on exhaustion — throttle, hard block, or automatic paid overage. No other plans or tiers, no cross-plan generalization, never guess fees; record source + date. Then confirm via one `pick_many` (subscription / pay-per-token / free) with the lookup findings preselected; anything the lookup couldn't settle is **user-asserted**.
+5. **Classification**: telemetry first, then per-provider lookup, then a two-tap confirm — a provider with `status: "ok"` and a `rate_limit`/`percent` entry is a **quota-window subscription** (verified-live); a `balance`/`value` entry is **pay-per-token balance**. For providers the telemetry doesn't cover, look each one up on the internet **one at a time**: fetch its current published pricing/limits pages and enumerate the subscription plans it currently sells (names, quota mechanics, overage per plan) — no cross-plan generalization, never guess fees, record source + date. Then confirm that provider with at most two multiple-choice questions: (1) `pick_one` "which plan do you have?" using the looked-up plan names (plus "pay-as-you-go only" / "not sure"); skip if the lookup found no subscription plans. (2) `pick_one` "what happens at the limit?" ("blocked/throttled until reset" vs. "falls back to pay-as-you-go / credits") — only when research didn't already settle overage; otherwise state the finding and skip. The user taps, never types; "not sure" keeps the provider **unresolved** — never guessed, excluded from cost/headroom math until resolved.
 
 ## Constraint parsing from `$ARGUMENTS`
 

@@ -14,7 +14,7 @@ description: >-
   first-time micode.json creation, application code, or non-model config.
 ---
 
-<!-- routing-optimizer:version=0.2.2 -->
+<!-- routing-optimizer:version=0.2.3 -->
 
 # Audit & Pareto-optimize micode model assignments
 
@@ -57,13 +57,13 @@ For each candidate `(provider, model)`:
 4. **Quota telemetry** (when the quota plugin is installed): read `opencode-quota show --json` and record per-provider `percentRemaining`, `window`, and `resetAt` from `resultType: "rate_limit"` + `renderType: "percent"` entries; `resultType: "balance"` + `renderType: "value"` is money remaining, not a quota percentage. `authority: "provider_reported"` = verified-live; anything else is approximate. Fresh install or idle session → `unavailable` until opencode has run with the plugin active.
 5. **Provenance**: in the output, mark each claim as verified-live-today vs. user-asserted. A future run must be able to spot drift.
 
-## Provider classification — telemetry first, scoped web lookup, then confirm
+## Provider classification — telemetry first, per-provider lookup, then two taps
 
 Config files don't record whether a provider is a subscription or pay-per-token — the same provider key can back either. The quota plugin can, when it covers the provider. Classify in this order:
 
 1. **Telemetry first** (plugin installed): a provider with `status: "ok"` and a `rate_limit`/`percent` entry is a **quota-window subscription — verified-live** (`percentRemaining`, `window`, `resetAt`); a `balance`/`value` entry is **pay-per-token balance** (real money, not a percentage). Record `authority` as provenance. Map quota-plugin provider keys to configured provider keys with the same dynamic resolution rules (exact → unique substring → ask).
-2. **Scoped web lookup for the gap**: before asking the user to classify anything blindly, look it up on the internet. For every provider the telemetry cannot classify (absent, `unavailable`, or ambiguous) — and every presumed subscription whose quota mechanics are unknown — fetch the provider's **current published pricing/limits pages**, with every query scoped to **the plan the user is actually signed up for** (identified from telemetry, auth mode — OAuth vs API key — or the user's answer). Determine exactly two things: (a) whether that plan carries a usage quota at all (quota windows/pools vs. pure pay-per-token) and what its limits are; (b) the **overage behavior** on exhaustion — throttle, hard block, or automatic paid overage. Do not research other plans or tiers, do not generalize one plan's terms onto another, and never guess fees. Record findings with source + date.
-3. **Confirm with the user**: classify the remaining providers via one `pick_many` (subscription / pay-per-token / free), presenting the lookup findings as the preselected recommendations. If the lookup was inconclusive, the classification stays **user-asserted**, never guessed.
+2. **Per-provider web lookup for the gap**: before asking the user anything, look each unclassified provider up on the internet — one provider at a time. For every provider the telemetry cannot classify (absent, `unavailable`, or ambiguous) — and every presumed subscription whose quota mechanics are unknown — fetch its **current published pricing/limits pages** and enumerate the subscription plans it currently sells: plan names, quota mechanics per plan, and overage behavior per plan. Don't generalize one plan's terms onto another, and never guess fees. Record findings with source + date.
+3. **Confirm per provider — at most two taps**: still one provider at a time, never a bulk questionnaire. Ask only what the lookup left open: (a) `pick_one` — "which plan do you have on `<provider>`?" with the looked-up plan names as options (plus "pay-as-you-go only — no subscription" and "not sure"); skip entirely when the lookup found no subscription plans — the provider is pay-per-token or free, record and move on. If the user's real plan isn't listed, let them say so (free-text "other") and treat it as authoritative. (b) `pick_one` — "what happens when the limit is reached?" ("blocked/throttled until the window resets" vs. "falls back to pay-as-you-go / paid credits"); ask only when the research didn't already settle overage for that plan — otherwise state the finding (source + date) and skip. Every option is multiple choice; the user taps, never types. "Not sure" keeps the provider **unresolved** — never guessed, and excluded from cost/headroom math until resolved.
 
 All cost math runs over the verified classification + the live pricing fetch.
 

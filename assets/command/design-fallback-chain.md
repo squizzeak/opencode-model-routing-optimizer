@@ -3,7 +3,7 @@ description: Design a subscription-aware opencode-model-router preset + fallback
 agent: commander
 ---
 
-<!-- routing-optimizer:version=0.2.2 -->
+<!-- routing-optimizer:version=0.2.3 -->
 
 Design a complete `opencode-model-router` override layer for the user's subscription mix. **Fully provider- and model-agnostic**: this command contains no alias table, no preferred provider, and no model IDs. Every provider token resolves against the user's live configuration; every model ID comes from the live `opencode models` catalog; every price or quality claim is rechecked against live sources at run time. `<cheap-provider>` and `<heavy-provider>` below are slots — the resolved canonical keys from the user's own setup.
 
@@ -44,11 +44,11 @@ Parse `$ARGUMENTS`:
 
 For each token: lowercase → strip any `/model` suffix → exact match against `configured_providers` → unique substring match → otherwise `pick_one` from the actual configured providers. Announce what each token resolved to. The configured set is the entire universe — there is no fallback alias list.
 
-### Subscription classification — telemetry, scoped lookup, then confirm
+### Subscription classification — telemetry, per-provider lookup, then two taps
 
 Config files don't record whether a provider is a subscription or pay-per-token (the same provider key can back either). First use available quota telemetry: `status: "ok"` plus `resultType: "rate_limit"` / `renderType: "percent"` identifies a quota-window subscription; `percentRemaining`, `window`, and `resetAt` provide live headroom. `resultType: "balance"` / `renderType: "value"` is money remaining, not a percentage. `authority: "provider_reported"` is verified-live provenance; missing or unhealthy entries remain ambiguous.
 
-**Before asking the user to classify anything blindly, look the gap up on the internet.** For every provider the telemetry cannot classify — and every presumed subscription whose quota mechanics are unknown — fetch the provider's current published pricing/limits pages, with every query scoped to **the plan the user is actually signed up for**, and determine exactly two things: (1) whether that plan carries a usage quota (quota windows/pools vs. pure pay-per-token) and its limits, and (2) the **overage behavior** on exhaustion — throttle, hard block, or automatic paid overage. Don't research other plans or tiers, don't generalize one plan's terms onto another, and never guess fees; record findings with source + date. Then confirm via one `pick_many` over the unresolved providers — subscription / pay-per-token / free — with the lookup findings preselected. If the lookup was inconclusive, that provider's classification is **user-asserted**.
+**Before asking the user anything, look each gap up on the internet — one provider at a time.** For every provider the telemetry cannot classify, fetch its current published pricing/limits pages and enumerate the subscription plans it currently sells: plan names, quota mechanics per plan, overage behavior per plan. Don't generalize across plans, never guess fees; record findings with source + date. Then confirm that provider — never as a bulk questionnaire — with at most two multiple-choice questions: (1) `pick_one` "which plan do you have on `<provider>`?" using the looked-up plan names as options (plus "pay-as-you-go only — no subscription" and "not sure"); skip entirely when the lookup found no subscription plans — the provider is pay-per-token or free, no question needed. (2) `pick_one` "what happens at the limit?" ("blocked/throttled until the window resets" vs. "falls back to pay-as-you-go / paid credits") — only when research didn't already settle overage for that plan; otherwise state the finding (source + date) and skip. The user taps, never types. "Not sure" keeps the provider **unresolved** — never guessed, excluded from headroom math until resolved.
 
 Then: **cheapest-bundled** = lowest effective $/1M among the user's subscriptions (ask if unknown — never guess fees); **largest-subscription** = most quota headroom + strongest models for `@heavy`, using live `percentRemaining` when available. Surface the inferred pair and provenance for confirmation.
 
