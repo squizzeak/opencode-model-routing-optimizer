@@ -14,7 +14,7 @@ import { INSTALL_TARGETS, installOne, } from "./installer.js";
  * No interactive side effects, no commands, no keybindings — `opencode`
  * still starts even when every install fails.
  */
-const PLUGIN_VERSION = "0.2.3";
+const PLUGIN_VERSION = "0.2.4";
 /**
  * Resolve the user's opencode config root, honoring `XDG_CONFIG_HOME` when
  * present and defaulting to `~/.config/opencode` on every platform.

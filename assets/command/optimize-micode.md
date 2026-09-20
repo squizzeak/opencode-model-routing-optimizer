@@ -1,9 +1,9 @@
 ---
-description: Audit and Pareto-optimize micode.json model assignments across all configured providers. Fully dynamic — providers, models, prices, and benchmarks are pulled live at run time; nothing is hardcoded. Usage: /optimize-micode [quality|cost|ttft|two-tier|free] [scope]
+description: Audit and Pareto-optimize micode.json model assignments across all configured providers. Fully dynamic — providers, models, prices, and benchmarks are pulled live at run time; nothing is hardcoded. Usage: /optimize-micode [quality|cost|ttft|two-tier|free] [scope] [focus: <text>]
 agent: commander
 ---
 
-<!-- routing-optimizer:version=0.2.3 -->
+<!-- routing-optimizer:version=0.2.4 -->
 
 Pareto-optimize the `model` field of every agent in `~/.config/opencode/micode.json` against every `(provider, model)` tuple reachable from the **live** opencode session. This command ships no provider lists, no model IDs, and no price tables — everything is discovered and re-verified at run time.
 
@@ -27,7 +27,7 @@ For every candidate tuple:
 
 1. **Validity (hard gate)**: must resolve in the live catalog — `opencode models <provider> | grep -x "<provider>/<model>"`. models.dev/docs are research, not validity; the session catalog wins. Same provider key can expose different models under different auth modes.
 2. **Pricing**: fetch the provider's **current** published pricing page; record today's $/1M in/out plus subscription quota mechanics (window, pool, throttle, overage).
-3. **Quality**: websearch recent (≤ ~90 days) benchmark comparisons, date-anchored to now.
+3. **Quality**: websearch recent (≤ ~90 days) benchmark comparisons, date-anchored to now. With an active `focus` qualifier, scope these searches to the stated domain and record the lens in provenance; without one, the default lens is general coding benchmarks.
 4. **Quota telemetry** (when the quota plugin is installed): read `opencode-quota show --json`; record `percentRemaining`, `window`, and `resetAt` from `resultType: "rate_limit"` + `renderType: "percent"` entries (`balance`/`value` is money remaining, not a quota percentage). `authority: "provider_reported"` = verified-live; fresh install or idle session → `unavailable` until opencode has run with the plugin active.
 5. **Classification**: telemetry first, then per-provider lookup, then a two-tap confirm — a provider with `status: "ok"` and a `rate_limit`/`percent` entry is a **quota-window subscription** (verified-live); a `balance`/`value` entry is **pay-per-token balance**. For providers the telemetry doesn't cover, look each one up on the internet **one at a time**: fetch its current published pricing/limits pages and enumerate the subscription plans it currently sells (names, quota mechanics, overage per plan) — no cross-plan generalization, never guess fees, record source + date. Then confirm that provider with at most two multiple-choice questions: (1) `pick_one` "which plan do you have?" using the looked-up plan names (plus "pay-as-you-go only" / "not sure"); skip if the lookup found no subscription plans. (2) `pick_one` "what happens at the limit?" ("blocked/throttled until reset" vs. "falls back to pay-as-you-go / credits") — only when research didn't already settle overage; otherwise state the finding and skip. The user taps, never types; "not sure" keeps the provider **unresolved** — never guessed, excluded from cost/headroom math until resolved.
 
@@ -39,6 +39,7 @@ For every candidate tuple:
 - `two-tier` (default) — lead/interactive → speed-optimized; unattended fleet → cost-optimized.
 - `free` — only $0 effective-cost tuples; verify each provider's free path with the user (true free vs. paid-overage fallback).
 - **Scope** (second token): `all` (default), `subscription`, `direct`, `free`, or an explicit comma-separated provider list drawn from `configured_providers` only.
+- **`focus: <free text>`** — optional domain qualifier for the quality axis, e.g. `focus: coding effectiveness`, `focus: creative writing`, `focus: python specifically`. It scopes the quality axis's live benchmark research (step 3) to that domain, so a model that is generic-benchmark-mediocre but strong on the focused domain can reach the Pareto front. Cost, TTFT, quota math, and the delegation gate are unaffected. A bare free-text tail that matches no constraint token or scope is treated as focus. Too vague to steer search (e.g. "good") → one `ask_text`. Nothing is hardcoded — the qualifier only steers this run's live searches, never a shipped domain→benchmark table.
 
 Unknown or unresolvable scope tokens → `pick_one` from the actual configured providers. No aliases, no guesses.
 

@@ -3,7 +3,7 @@ description: Design a subscription-aware opencode-model-router preset + fallback
 agent: commander
 ---
 
-<!-- routing-optimizer:version=0.2.3 -->
+<!-- routing-optimizer:version=0.2.4 -->
 
 Design a complete `opencode-model-router` override layer for the user's subscription mix. **Fully provider- and model-agnostic**: this command contains no alias table, no preferred provider, and no model IDs. Every provider token resolves against the user's live configuration; every model ID comes from the live `opencode models` catalog; every price or quality claim is rechecked against live sources at run time. `<cheap-provider>` and `<heavy-provider>` below are slots — the resolved canonical keys from the user's own setup.
 

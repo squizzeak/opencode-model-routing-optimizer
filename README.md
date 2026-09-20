@@ -131,10 +131,39 @@ ls ~/.config/opencode/skills/optimize-micode-models/SKILL.md \
 Each file should contain a line near the top:
 
 ```html
-<!-- routing-optimizer:version=0.2.1 -->
+<!-- routing-optimizer:version=0.2.4 -->
 ```
 
 That marker is what tells the plugin whether to overwrite on upgrade.
+
+## Using the commands
+
+`/optimize-micode` works bare and accepts an optional constraint, scope,
+and free-text **focus** qualifier:
+
+```sh
+/optimize-micode                        # two-tier default, all providers
+/optimize-micode cost                   # cheapest picks that clear quality floors
+/optimize-micode quality subscription   # best benchmarks among subscription providers
+/optimize-micode free                   # only $0 effective-cost tuples
+/optimize-micode focus: python specifically
+/optimize-micode two-tier focus: creative writing
+/optimize-micode cost focus: coding effectiveness
+```
+
+`focus:` is free text that steers **which benchmarks the quality axis
+consults** on that run — coding effectiveness, creative writing, a
+specific language, anything. Without it the quality lens defaults to
+general coding benchmarks; with it, models that are strong on the
+focused domain can win the comparison even when generic benchmarks rank
+them lower. Cost, latency, and quota math — and the lead-agent
+delegation gate — are unaffected, and nothing is hardcoded: the text
+only scopes that run's live research.
+
+`/design-fallback-chain` works bare (it infers the
+`sub-<cheap>-<heavy>` preset pair from your subscriptions) or with
+arguments — see the installed command file for the full grammar
+(`~/.config/opencode/command/design-fallback-chain.md`).
 
 ## Uninstallation
 

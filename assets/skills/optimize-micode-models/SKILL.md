@@ -14,7 +14,7 @@ description: >-
   first-time micode.json creation, application code, or non-model config.
 ---
 
-<!-- routing-optimizer:version=0.2.3 -->
+<!-- routing-optimizer:version=0.2.4 -->
 
 # Audit & Pareto-optimize micode model assignments
 
@@ -53,7 +53,7 @@ For each candidate `(provider, model)`:
    ```
    The live `opencode models <provider>` output is the **only** validity test. models.dev and provider docs can list models the session's cached catalog rejects (config-loader then warns `Model not available` at startup). `--refresh` may still serve the stale cache; the raw cache is `~/.cache/opencode/models.json`. The same provider key can also expose **different models under different auth modes** (OAuth subscription vs API key) — the live session is the arbiter.
 2. **Pricing**: fetch each provider's **current published pricing** (their pricing page or catalog endpoint). Record today's $/1M input and output. For subscriptions, record the quota mechanics (window length, pool size, throttle behavior, overage rules) — these matter more than list price.
-3. **Quality**: websearch **recent** (≤ ~90 days) benchmark comparisons between candidates, anchored to the current date (`"<model-a> vs <model-b>" coding <current month> <current year>`). Older results are yellow flags, not evidence.
+3. **Quality**: websearch **recent** (≤ ~90 days) benchmark comparisons between candidates, anchored to the current date (`"<model-a> vs <model-b>" coding <current month> <current year>`). Older results are yellow flags, not evidence. With an active `focus` qualifier, scope these searches to the stated domain (e.g. `"<model-a> vs <model-b>" creative writing <current month> <current year>`) and record the lens in the provenance notes; without one, the default lens is general coding benchmarks.
 4. **Quota telemetry** (when the quota plugin is installed): read `opencode-quota show --json` and record per-provider `percentRemaining`, `window`, and `resetAt` from `resultType: "rate_limit"` + `renderType: "percent"` entries; `resultType: "balance"` + `renderType: "value"` is money remaining, not a quota percentage. `authority: "provider_reported"` = verified-live; anything else is approximate. Fresh install or idle session → `unavailable` until opencode has run with the plugin active.
 5. **Provenance**: in the output, mark each claim as verified-live-today vs. user-asserted. A future run must be able to spot drift.
 
@@ -97,6 +97,7 @@ Parsed from `$ARGUMENTS` or via `ask_text`/`pick_many`:
 - **`two-tier`** (default) — interactive agents → speed-optimized pick; unattended agents → cost-optimized pick.
 - **`free`** — only $0 effective-cost tuples (bundled quota remaining + free tiers); check whether each provider's free path is truly free or falls back to paid overage — verify with the user.
 - **scope** — `all` (default), a class filter (`subscription` / `direct` / `free`), or an explicit provider list drawn from `configured_providers`.
+- **`focus`** — optional free-text domain qualifier for the quality axis (e.g. `coding effectiveness`, `creative writing`, `python specifically`). It scopes the quality axis's live benchmark research (step 3) to that domain, so a model that is generic-benchmark-mediocre but strong on the focused domain can reach the Pareto front. Cost, TTFT, quota math, and the delegation gate are unaffected. Bare free text in `$ARGUMENTS` that matches no constraint token or scope is the focus. Too vague to steer search → one `ask_text`. No domain→benchmark table is shipped — the qualifier only steers this run's live searches, and the lens used is recorded in provenance.
 
 ## Two-tier doctrine (micode default)
 
