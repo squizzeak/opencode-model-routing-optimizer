@@ -13,7 +13,7 @@ description: >-
   consent. Does NOT modify micode.json or silently provision credentials.
 ---
 
-<!-- routing-optimizer:version=0.2.1 -->
+<!-- routing-optimizer:version=0.2.2 -->
 
 # Design a subscription-aware routing config
 
@@ -137,20 +137,24 @@ Resolve each token the user typed against `configured_providers` directly:
 
 If `$ARGUMENTS` is empty, infer `sub-<cheapest-bundled>-<largest-subscription>` as below.
 
-#### Subscription classification — ask, never assume
+#### Subscription classification — telemetry, scoped lookup, then confirm
 
 **Config files do not record whether a provider is a subscription.** An OAuth-backed subscription and a pay-per-token API key can produce the identical provider key. When the opencode-quota telemetry from step 2 is available, use it as the **verified-live** classification signal before asking:
 
 - A provider whose entry has `status: "ok"` and an `entries[]` item with `resultType: "rate_limit"` + `renderType: "percent"` is a **quota-window subscription** — `percentRemaining`, `window`, and `resetAt` tell you its live headroom and reset time.
 - An entry with `resultType: "balance"` + `renderType: "value"` is **pay-per-token balance** — real money remaining, but **not** a percentage, so it can't be ranked by threshold.
 - `authority: "provider_reported"` marks the reading as verified-live (vs. inferred). Record that provenance.
-- A provider that is `status != "ok"` or absent from the quota output has no live signal — classify it by asking.
+- A provider that is `status != "ok"` or absent from the quota output has no live signal.
 
-Then, for anything still ambiguous, ask the user once with `pick_many` over `configured_providers`:
+**Before asking the user to classify anything blindly, look the gap up on the internet.** For every provider the telemetry cannot classify — and every presumed subscription whose quota mechanics are unknown — fetch the provider's **current published pricing/limits pages**. Scope every query to **the plan the user is actually signed up for** (from telemetry, auth mode — OAuth vs API key — or the user's answer) and determine exactly two things: (1) whether that plan carries a usage quota at all (quota windows/pools vs. pure pay-per-token) and what its limits are; (2) the **overage behavior** on exhaustion — throttle, hard block, or automatic paid overage. Don't research other plans or tiers, don't generalize one plan's terms onto another, and never guess fees. Record findings with source + date.
+
+Then, for anything still ambiguous after the lookup, ask the user once with `pick_many` over `configured_providers` — presenting the lookup findings as the preselected recommendations:
 
 - Which providers are **subscriptions / bundled** (flat fee, quota windows)?
 - Which are **pay-per-token**?
 - Which are **free-tier** (no billing at all)?
+
+If the lookup was inconclusive, that provider's classification is **user-asserted**, never guessed.
 
 Then apply the heuristics over the combined live + user classification:
 
@@ -179,7 +183,7 @@ For each candidate `(provider, model)`:
 
 1. **Pricing**: fetch the provider's current published pricing page (webfetch or equivalent). Record today's `$ / 1M` input and output, plus any subscription mechanics (quota windows, pool sizes, throttles, overage rules).
 2. **Quality**: websearch for recent comparisons between the candidates, anchored to the current date (e.g. `"<model-a> vs <model-b>" coding benchmark <current month> <current year>`). Prefer results from the last ~90 days; anything older is a yellow flag.
-3. **Subscription facts**: when the step-2 telemetry is available, window length (`window`), reset time (`resetAt`), and current headroom (`percentRemaining`) come from opencode-quota — verified-live when `authority: "provider_reported"`. Without it, quota size, window length, and plan tier are user-asserted unless the provider exposes a verifiable usage endpoint. Ask when unknown; never guess a fee. A `balance`-type reading (`renderType: "value"`) is money remaining, not a quota percentage — never rank subscription headroom by it.
+3. **Subscription facts**: when the step-2 telemetry is available, window length (`window`), reset time (`resetAt`), and current headroom (`percentRemaining`) come from opencode-quota — verified-live when `authority: "provider_reported"`. Without it, quota size, window length, and plan tier are user-asserted unless the provider exposes a verifiable usage endpoint. Fill unknowns via the classification section's scoped plan lookup (signed-up plan only: quota yes/no, limits, overage behavior), then confirm with the user; never guess a fee. A `balance`-type reading (`renderType: "value"`) is money remaining, not a quota percentage — never rank subscription headroom by it.
 4. **Record provenance**: note in the JSONC comments (or the summary output) what was verified live today vs. what the user asserted — a future run can spot drift instead of trusting a stale number.
 
 Pricing and benchmark data **inform** tier choice; the live `opencode models` catalog (step 4) remains the only **validity** test for a model ID.

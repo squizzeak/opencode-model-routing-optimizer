@@ -14,7 +14,7 @@ description: >-
   first-time micode.json creation, application code, or non-model config.
 ---
 
-<!-- routing-optimizer:version=0.2.1 -->
+<!-- routing-optimizer:version=0.2.2 -->
 
 # Audit & Pareto-optimize micode model assignments
 
@@ -57,12 +57,13 @@ For each candidate `(provider, model)`:
 4. **Quota telemetry** (when the quota plugin is installed): read `opencode-quota show --json` and record per-provider `percentRemaining`, `window`, and `resetAt` from `resultType: "rate_limit"` + `renderType: "percent"` entries; `resultType: "balance"` + `renderType: "value"` is money remaining, not a quota percentage. `authority: "provider_reported"` = verified-live; anything else is approximate. Fresh install or idle session → `unavailable` until opencode has run with the plugin active.
 5. **Provenance**: in the output, mark each claim as verified-live-today vs. user-asserted. A future run must be able to spot drift.
 
-## Provider classification — telemetry first, ask only for the gap
+## Provider classification — telemetry first, scoped web lookup, then confirm
 
 Config files don't record whether a provider is a subscription or pay-per-token — the same provider key can back either. The quota plugin can, when it covers the provider. Classify in this order:
 
 1. **Telemetry first** (plugin installed): a provider with `status: "ok"` and a `rate_limit`/`percent` entry is a **quota-window subscription — verified-live** (`percentRemaining`, `window`, `resetAt`); a `balance`/`value` entry is **pay-per-token balance** (real money, not a percentage). Record `authority` as provenance. Map quota-plugin provider keys to configured provider keys with the same dynamic resolution rules (exact → unique substring → ask).
-2. **Ask about the rest**: providers `unavailable` in the telemetry (or with the plugin absent) may be pay-per-token, free, or unsupported — classify via one `pick_many` (subscription / pay-per-token / free). Never guess fees.
+2. **Scoped web lookup for the gap**: before asking the user to classify anything blindly, look it up on the internet. For every provider the telemetry cannot classify (absent, `unavailable`, or ambiguous) — and every presumed subscription whose quota mechanics are unknown — fetch the provider's **current published pricing/limits pages**, with every query scoped to **the plan the user is actually signed up for** (identified from telemetry, auth mode — OAuth vs API key — or the user's answer). Determine exactly two things: (a) whether that plan carries a usage quota at all (quota windows/pools vs. pure pay-per-token) and what its limits are; (b) the **overage behavior** on exhaustion — throttle, hard block, or automatic paid overage. Do not research other plans or tiers, do not generalize one plan's terms onto another, and never guess fees. Record findings with source + date.
+3. **Confirm with the user**: classify the remaining providers via one `pick_many` (subscription / pay-per-token / free), presenting the lookup findings as the preselected recommendations. If the lookup was inconclusive, the classification stays **user-asserted**, never guessed.
 
 All cost math runs over the verified classification + the live pricing fetch.
 
@@ -75,7 +76,7 @@ Provider **classes** that shape the axes (identified from the live config, not a
 | Aggregator             | One endpoint fronting many upstreams                  | Adds a proxy hop (~+100–300 ms TTFT typically); free tiers are aggregated upstreams and still quota-capped |
 | Free tier              | No billing at all (user-confirmed)                    | $0 but daily rate-limited; quality varies by upstream                      |
 
-Subscription quota math needs the user's billing context: pool size, window length, what happens on exhaustion (throttle vs. paid overage). Ask; never guess.
+Subscription quota math needs the billing context: pool size, window length, what happens on exhaustion (throttle vs. paid overage). Get it from telemetry or the scoped plan lookup above, confirm it with the user, and never guess.
 
 ## Pareto logic
 
