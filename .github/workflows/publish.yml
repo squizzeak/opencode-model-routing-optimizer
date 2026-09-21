@@ -65,11 +65,9 @@ jobs:
         # npm 11 exchanges the GitHub Actions OIDC token for npm credentials.
         # Authentication and provenance signing are separate operations.
         #
-        # `--access public` is intentionally omitted: this workflow is
-        # re-used for both private (early) and public (release) publishes.
-        # The effective access level comes from `publishConfig.access` in
-        # package.json — `restricted` for pre-release test publishes,
-        # `public` for the final 1.0+ tag.
+        # `--access public` is intentionally omitted: the effective access
+        # level comes from `publishConfig.access` in package.json, which is
+        # `public` for this unscoped package.
         env:
           NPM_CONFIG_PROVENANCE: "true"
         run: npm publish --provenance

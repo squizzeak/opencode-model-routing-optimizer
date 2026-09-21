@@ -5,15 +5,13 @@ description: >-
   opencode-model-router, including /design-fallback-chain, subscription-first
   routing, preserving subscription quota, tier assignment, and router overrides.
   Discovers providers and models dynamically from the live opencode session
-  (config, auth store, `opencode models` output, and @slkiser/opencode-quota
-  data when installed); hardcodes none.
-  Rechecks live pricing, benchmark data, and — via the opencode-quota CLI —
-  remaining-quota telemetry before every tier pick. Offers to install missing
-  prerequisites (router plugin, opencode-quota, provider auth) with user
+  (config, auth store, and `opencode models` output); hardcodes none.
+  Rechecks live pricing and benchmark data before every tier pick. Offers
+  to install missing prerequisites (router plugin, provider auth) with user
   consent. Does NOT modify micode.json or silently provision credentials.
 ---
 
-<!-- routing-optimizer:version=0.2.4 -->
+<!-- routing-optimizer:version=0.1.4 -->
 
 # Design a subscription-aware routing config
 
@@ -28,7 +26,7 @@ The user has **at least one bundled subscription** routed through opencode — a
 - **When a subscription exhausts**, fall back to the next configured provider — terminating at an explicitly free endpoint when one exists.
 - **Keep the orchestrator** (the lead agent that runs on every message) on the cheapest route so it doesn't itself burn the heavy subscription.
 
-This skill is **fully provider- and model-agnostic**. It contains no alias tables, no preferred providers, and no model IDs. Everything is resolved at runtime from four live sources (below). Providers that appear in prose here are illustrative placeholders, not defaults.
+This skill is **fully provider- and model-agnostic**. It contains no alias tables, no preferred providers, and no model IDs. Everything is resolved at runtime from three live sources (below). Providers that appear in prose here are illustrative placeholders, not defaults.
 
 ## What the plugin can and cannot do (the gap)
 
@@ -59,16 +57,15 @@ The orchestrator is **deliberately not** on the heavy subscription — that prot
 
 ## Workflow
 
-### 1. Inventory current state — four live sources
+### 1. Inventory current state — three live sources
 
-Provider and plugin truth comes from **four sources**, never from a static list. Read them in parallel:
+Provider and plugin truth comes from **three sources**, never from a static list. Read them in parallel:
 
 1. **`~/.config/opencode/opencode.json`** — the `plugin` array and any `provider.*` override blocks.
    - Build `configured_plugins`: normalize each `plugin` entry by stripping any npm scope (`@org/`) and any version/`@latest` suffix, so `opencode-model-router@latest` → `opencode-model-router`.
    - Build `provider_overrides`: the `provider.*` keys. Note: many valid providers have **no** entry here — they need no override.
 2. **`~/.local/share/opencode/auth.json`** — every key in this file is a provider with credentials registered. A provider can exist here (e.g. an OAuth subscription or a proxy-service key) with zero `provider.*` entry in `opencode.json` — opencode resolves it from models.dev + the auth store alone.
 3. **The live session catalog** — run `opencode models` and capture the full `provider/model-id` list. This is the **ground truth** for what each provider actually exposes in this session right now.
-4. **`opencode-quota show --json`** — when `@slkiser/opencode-quota` is installed: live per-provider quota/budget data (schema v2). Providers reporting `status: "ok"` or `"partial"` with entries are quota-managed; `percentRemaining` + `resetAt` feed tier and chain decisions. The CLI reads **cached** data collected by the plugin during normal opencode activity — a fresh install or idle session reports `unavailable` until opencode has run with the plugin active.
 
 ```bash
 opencode models 2>&1 | grep -v '^\[micode\]'   # strip unrelated plugin log lines
@@ -93,24 +90,14 @@ Never refuse on a missing prerequisite without first offering to fix it. Check i
    - Always install plugins as `@latest` (or the bare package name, which resolves the same way). Never pin a version.
    - On yes: apply the edit. The plugin loads on the next opencode start. **Continue designing** — writing the overrides file now is harmless (it's inert without the plugin) and means one restart activates everything. Say so.
    - On no: stop. The overrides file is inert without the plugin.
-2. **Live quota telemetry (recommended)**: `@slkiser/opencode-quota` turns quota classification from user-asserted into verified-live. The **opencode plugin** collects per-provider quota snapshots during normal opencode activity; the optional **`opencode-quota` CLI** (or the export file) reads that cache from scripts. The CLI alone never fills the cache — the plugin must be active in opencode. It is a **recommended** prerequisite, not a hard one — without it the skill falls back to asking the user to classify subscriptions (step 3), which still works. Check for it first:
-   ```bash
-   command -v opencode-quota && opencode-quota show --json >/dev/null 2>&1
-   ```
-   - If present → read `opencode-quota show --json` now and keep the parsed result for steps 3, 5, and 7. Note `fromCache`/`cacheAgeSeconds`; if the snapshot is stale, say so and treat the numbers as approximate.
-   - If missing → show the exact install and ask via `confirm`:
-     > Add `"@slkiser/opencode-quota@latest"` to the `plugin` array in `~/.config/opencode/opencode.json`? (List any companion auth plugins **before** it — ordering matters. The plugin collects quota snapshots while opencode runs. Optionally also `npm install -g @slkiser/opencode-quota@latest` — requires Node ≥ 22 — for a terminal CLI; the plugin alone is enough for this skill, which can read the export file directly.)
-     - Always install as `@latest`. Never pin a version.
-     - On yes: apply the edit, then read the export file at `~/.cache/opencode/quota-export.json` (written by the plugin; empty until opencode has run with it active — if absent, mark quota claims user-asserted for this run). (Optionally mention `opencode-quota init` for the TUI sidebar, but that interactive setup is out of this skill's scope — don't run it.)
-     - On no: continue. Mark every quota claim in this run as **user-asserted**, not verified-live, and proceed to step 3's ask-the-user classification.
-3. **Both strategy providers configured**: the `<cheap>` and `<heavy>` providers (named or inferred in step 3) must both appear in `configured_providers`.
+2. **Both strategy providers configured**: the `<cheap>` and `<heavy>` providers (named or inferred in step 3) must both appear in `configured_providers`.
    - If a provider is missing → offer the setup recipe matching its shape, via `confirm`:
      - **Plugin-backed provider** (a community plugin supplies the provider integration): offer to add the plugin's npm package to the `plugin` array as `"<package>@latest"` AND register its credential. Ask for the API key via `ask_text` (never invent one), then register it in `~/.local/share/opencode/auth.json` as `{ "type": "api", "key": "<key>" }` under the provider's key. Note that auth.json is read at startup.
      - **OAuth subscription provider**: offer to walk the user through `opencode auth login` for that provider. This is interactive — the user completes it in their terminal.
      - **Plain API-key provider**: offer to register the key in `auth.json` (same shape as above) or add a `provider.<name>.options.apiKey` entry referencing an env var, per the provider's docs.
    - On yes: apply, then re-run the step-1 inventory to confirm the provider now resolves (`opencode models <provider>` non-empty).
    - On no: stop and surface what remains. The skill does NOT silently substitute a different provider for one the user named.
-4. **Optional free-tier fallback**: if any configured provider has a genuine $0 tier (no billing at all), record it for chain termination. If none, chains terminate at the cheapest configured route.
+3. **Optional free-tier fallback**: if any configured provider has a genuine $0 tier (no billing at all), record it for chain termination. If none, chains terminate at the cheapest configured route.
 
 ### 3. Confirm or extract the user's strategy
 
@@ -137,28 +124,18 @@ Resolve each token the user typed against `configured_providers` directly:
 
 If `$ARGUMENTS` is empty, infer `sub-<cheapest-bundled>-<largest-subscription>` as below.
 
-#### Subscription classification — telemetry, per-provider lookup, then two taps
+#### Subscription classification — ask, never assume
 
-**Config files do not record whether a provider is a subscription.** An OAuth-backed subscription and a pay-per-token API key can produce the identical provider key. When the opencode-quota telemetry from step 2 is available, use it as the **verified-live** classification signal before asking:
+**Config files do not record whether a provider is a subscription.** An OAuth-backed subscription and a pay-per-token API key can produce the identical provider key. So when inference is needed, ask the user once with `pick_many` over `configured_providers`:
 
-- A provider whose entry has `status: "ok"` and an `entries[]` item with `resultType: "rate_limit"` + `renderType: "percent"` is a **quota-window subscription** — `percentRemaining`, `window`, and `resetAt` tell you its live headroom and reset time.
-- An entry with `resultType: "balance"` + `renderType: "value"` is **pay-per-token balance** — real money remaining, but **not** a percentage, so it can't be ranked by threshold.
-- `authority: "provider_reported"` marks the reading as verified-live (vs. inferred). Record that provenance.
-- A provider that is `status != "ok"` or absent from the quota output has no live signal.
+- Which providers are **subscriptions / bundled** (flat fee, quota windows)?
+- Which are **pay-per-token**?
+- Which are **free-tier** (no billing at all)?
 
-**Before asking the user anything, look each gap up on the internet — one provider at a time.** For every provider the telemetry cannot classify, fetch its **current published pricing/limits pages** and enumerate the subscription plans it currently sells: plan names, quota mechanics per plan, and overage behavior per plan. Don't generalize one plan's terms onto another, and never guess fees. Record findings with source + date.
-
-Then — still one provider at a time, never a bulk questionnaire — ask the user **only what the lookup left open**, with at most two multiple-choice questions:
-
-1. **Which plan?** (`pick_one`) — options are the plan names just found in the lookup (marked as looked-up today), plus "pay-as-you-go only — no subscription" and "not sure". This pick scopes everything downstream to that plan. If the lookup found no subscription plans at all, the provider is **pay-per-token or free — skip the questions entirely**, record, move on. If the user's real plan isn't in the list, let them say so (free-text "other") and treat their answer as authoritative.
-2. **What happens at the limit?** (`pick_one`) — "requests are blocked/throttled until the window resets" vs. "usage falls back to pay-as-you-go / paid credits". Ask only when the research didn't already settle overage behavior for the picked plan; if it did, state the finding (source + date) and skip the question.
-
-Every option is multiple choice — the user taps, never types. "Not sure" (or a plan that didn't match reality) keeps that provider **unresolved** — never guessed, and excluded from headroom math until it's resolved in a later question or a later run.
-
-Then apply the heuristics over the combined live + user classification:
+Then apply the heuristics over the user's classification:
 
 - **Cheapest bundled**: the subscription with the lowest expected effective `$/1M` at the user's workload (ask if unknown — do not guess fees).
-- **Largest subscription**: the subscription with the most quota headroom and strongest models for `@heavy`. When opencode-quota data is available, headroom is the live `percentRemaining` per window (with `resetAt` for when it refills) — verified-live, not guessed. Without it, fall back to the user's classification + the live catalog, and let the user confirm which is largest.
+- **Largest subscription**: the subscription with the most quota headroom and strongest models for `@heavy` (the user's classification + live catalog tell you which providers qualify; the user confirms which is largest).
 
 Always surface the inferred pair (and the classification) for confirmation before writing anything.
 
@@ -182,7 +159,7 @@ For each candidate `(provider, model)`:
 
 1. **Pricing**: fetch the provider's current published pricing page (webfetch or equivalent). Record today's `$ / 1M` input and output, plus any subscription mechanics (quota windows, pool sizes, throttles, overage rules).
 2. **Quality**: websearch for recent comparisons between the candidates, anchored to the current date (e.g. `"<model-a> vs <model-b>" coding benchmark <current month> <current year>`). Prefer results from the last ~90 days; anything older is a yellow flag.
-3. **Subscription facts**: when the step-2 telemetry is available, window length (`window`), reset time (`resetAt`), and current headroom (`percentRemaining`) come from opencode-quota — verified-live when `authority: "provider_reported"`. Without it, quota size, window length, and plan tier are user-asserted unless the provider exposes a verifiable usage endpoint. Fill unknowns via the classification section's per-provider flow (lookup enumerates plans → user picks the plan → overage question only if research left it open); never guess a fee. A `balance`-type reading (`renderType: "value"`) is money remaining, not a quota percentage — never rank subscription headroom by it.
+3. **Subscription facts**: quota size, window length, and plan tier are user-asserted unless the provider exposes a verifiable usage endpoint. Ask when unknown; never guess a fee.
 4. **Record provenance**: note in the JSONC comments (or the summary output) what was verified live today vs. what the user asserted — a future run can spot drift instead of trusting a stale number.
 
 Pricing and benchmark data **inform** tier choice; the live `opencode models` catalog (step 4) remains the only **validity** test for a model ID.
@@ -217,7 +194,6 @@ Compose a `presets.<name>` block. Naming: `sub-<resolved-cheap>-<resolved-heavy>
 Rules (provider-agnostic):
 
 - **`<heavy-provider>` lists `<cheap-provider>` first** — the core subscription-first promise: heavy quota failure falls through to the cheap route immediately.
-- **Use verified-live headroom for secondary entries when available**: among additional configured providers, prefer a route with higher `percentRemaining` and an earlier `resetAt` over one whose quota window is nearly exhausted. Do not override the required heavy → cheap order; without telemetry, mark headroom claims user-asserted.
 - **Every chain terminates at an explicitly free endpoint** when one is configured. Some subscription proxies silently fall back to free models at their own limits — the router doesn't know that, so the explicit entry is still required. No free tier → terminate at the cheapest configured route.
 - **Strip entries for providers that aren't configured.** Two configured providers → a two-entry chain.
 - The chain is **per-provider, not per-tier** — the plugin has no tier-specific chains. Fine for subscription-first: the failure mode is "this provider is exhausted", not "this tier is exhausted".
@@ -301,7 +277,7 @@ After applying, print:
 
 1. **Validation result** — JSONC parse + provider-coverage check + config-loader canary (zero "not available" warnings).
 2. **Rendered preset** — the full JSONC block, for visual confirmation.
-3. **Reasoning table** — one line per tier + one per fallback entry, explaining model choice and ratio/order. When quota data is available, add each provider's live `percentRemaining`/`resetAt`.
+3. **Reasoning table** — one line per tier + one per fallback entry, explaining model choice and ratio/order.
 4. **The lead-recovery gap** — reminder that the plugin cannot auto-recover the lead on quota exhaustion, with the manual `/preset <name>` recipe.
 5. **Restart reminder + post-restart verification** — restart, then `/router` / `/tiers` (and `/router preset <name>` if state drifted).
 
@@ -309,8 +285,6 @@ After applying, print:
 
 - Does **not** modify `~/.config/opencode/micode.json` (the Pareto skill's scope).
 - Does **not** author a quota-watcher plugin (see "Engineering the gap closer").
-- Does **not** require `opencode-quota` — it is a recommended telemetry source; without it, quota claims are labeled user-asserted and classification falls back to asking the user.
-- Does **not** treat a `balance` reading (money remaining) as a quota-window percentage or use it to rank subscription headroom.
 - Does **not** install plugins or register credentials **silently** — every prerequisite change is shown as the exact edit and applied only after explicit `confirm`/`ask_text` consent. Plugin entries are always added as `@latest`.
 - Does **not** pick a model on a provider the user hasn't configured, and never substitutes a different provider for one the user named.
 - Does **not** hardcode providers, aliases, or model IDs — everything resolves from the live session's config, auth store, and model catalog.

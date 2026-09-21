@@ -21,10 +21,68 @@ export interface InstallTarget {
     dstRel: string;
 }
 /**
- * The four assets shipped by this plugin. Keep in sync with `assets/` and the
+ * The two assets shipped by this plugin. Keep in sync with `assets/` and the
  * npm package's `files: ["dist", ...]` field.
  */
 export declare const INSTALL_TARGETS: ReadonlyArray<InstallTarget>;
+/**
+ * Content fingerprints of every byte this plugin ever shipped for now-retired
+ * asset paths. Each value is the sha256 hex of the file's CRLF-normalized
+ * UTF-8 bytes — the fingerprint of every byte this plugin ever shipped for the
+ * path (source + built assets, across all refs). A destination file is deleted
+ * ONLY when its fingerprint is in this set; marker presence alone is NOT
+ * ownership proof (a user can edit the body while leaving the marker intact).
+ *
+ * These hashes were recomputed from BOTH `assets/...` and `dist/assets/...`
+ * history across all refs; the union equals this list because dist content is a
+ * subset of source content.
+ */
+export declare const RETIRED_ASSET_HASHES: Readonly<Record<string, readonly string[]>>;
+/**
+ * A retired asset whose already-installed copies should be removed on upgrade.
+ */
+export interface RetiredTarget {
+    /** Destination path relative to the user's opencode config root. */
+    dstRel: string;
+    /** sha256 (CRLF-normalized) of every revision this plugin ever shipped. */
+    knownHashes: readonly string[];
+    /**
+     * When set, the now-empty directory to prune after a successful removal.
+     * Only ever the retired asset's own directory — never a shared `skills/`,
+     * `command/`, or the config root.
+     */
+    pruneDirRel?: string;
+}
+/**
+ * Retired targets derived from {@link RETIRED_ASSET_HASHES}. The SKILL entry
+ * owns its own directory and may prune it; the command entry never prunes
+ * because `command/` is shared.
+ */
+export declare const RETIRED_TARGETS: ReadonlyArray<RetiredTarget>;
+/** sha256 of CRLF-normalized UTF-8 bytes — the fingerprint used for ownership. */
+export declare function sha256Hex(buf: Buffer): string;
+export type RetireResult = {
+    status: "absent";
+    target: RetiredTarget;
+} | {
+    status: "removed";
+    target: RetiredTarget;
+} | {
+    status: "preserved";
+    target: RetiredTarget;
+    reason: string;
+} | {
+    status: "error";
+    target: RetiredTarget;
+    error: string;
+};
+/**
+ * Remove a retired asset only when its bytes are provably identical to a known
+ * shipped revision. Never deletes user-modified content. Preserves symlinks and
+ * paths with symlinked parents, rechecks identity immediately before removal,
+ * and prunes only the retired asset's own empty directory.
+ */
+export declare function retireOne(absConfigRoot: string, target: RetiredTarget): Promise<RetireResult>;
 /**
  * Extracts the routing-optimizer version from a markdown file's contents.
  * Returns `undefined` if the marker is missing or the file is unreadable.
@@ -47,13 +105,10 @@ export declare function readVersion(filePath: string): Promise<string | undefine
  * Returns true if a destination file is missing OR its version marker is
  * older than the source's. Pure logic — does not touch the filesystem.
  *
- * Semver string comparison is intentionally simple: we use the `>` operator
- * on the version strings. Both versions are expected to follow semver; the
- * fallback (string) comparison handles `0.1.0` < `0.1.2` correctly because
- * numeric components compare longer-than-alpha via string compare of zero-
- * padded values, and identical-length strings like `0.1.0` vs `0.1.20`
- * would otherwise compare wrong. We mitigate that by falling back to
- * `compareSemver` — see the implementation.
+ * Ordering is delegated to {@link compareSemver}: components are compared
+ * numerically (so `0.1.9` < `0.1.10`, unlike a lexicographic string compare)
+ * and a leading `v` is tolerated. Unparseable inputs fall back to a plain
+ * string comparison inside `compareSemver`.
  */
 export declare function needsInstall(srcVersion: string | undefined, dstVersion: string | undefined): boolean;
 /**
